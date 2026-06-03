@@ -1,6 +1,6 @@
 "use strict";
 
-const API_URL = "https://s-high-adavnced-system.onrender.com";
+const API_URL = "https://s-highadavnced-system.onrender.com";
 
 // ====== Token / Auth Store ====================================================
 const Auth = {
