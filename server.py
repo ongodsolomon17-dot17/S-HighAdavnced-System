@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 # ── CORS ───────────────────────────────────────────────────────────────────
 CORS(app,
-     origins="https://s-high-advanced-system.vercel.app",
+     origins="https://s-high-adavnced-system.vercel.app",
      methods=["GET", "POST", "PUT", "DELETE"],
      allow_headers=["Content-Type", "Authorization"])
 
