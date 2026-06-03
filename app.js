@@ -2,7 +2,7 @@
 
 const API_URL = "https://s-high-adavnced-system.onrender.com";
 
-// ===== Token / Auth Store ====================================================
+// ====== Token / Auth Store ====================================================
 const Auth = {
   get token()    { return sessionStorage.getItem("att_token"); },
   get company()  { return sessionStorage.getItem("att_company"); },
