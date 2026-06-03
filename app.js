@@ -1175,7 +1175,7 @@ if (Auth.isLoggedIn()) {
 }
 
 // Keep Render awake
-setInterval(() => fetch(`${API_URL}/auth/login`).catch(() => {}), 240000);
+setInterval(() => fetch(`${API_URL}/ping`).catch(() => {}), 240000);
 
 // Real-time refresh every 60s if admin is on dashboard/attendance tab
 setInterval(() => {

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Superadmin — S Advanced Attendance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0c1532;
+      --surface: rgba(255,255,255,0.08);
+      --surface-strong: rgba(255,255,255,0.12);
+      --text: #eef4ff;
+      --text-muted: #bfc9e3;
+      --accent: #3fc1c9;
+      --accent-strong: #2c9ea1;
+      --danger: #ff6b6b;
+      --success: #6dd28f;
+      --warn: #f0c040;
+      --shadow: 0 24px 60px rgba(0,0,0,0.24);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%;
+      font-family: "Sora", Inter, system-ui, sans-serif;
+      background: radial-gradient(circle at top left, rgba(63,193,201,0.22), transparent 28%),
+                  radial-gradient(circle at bottom right, rgba(50,95,255,0.18), transparent 30%),
+                  linear-gradient(180deg, #0f204a 0%, #0b1326 100%);
+      color: var(--text);
+    }
+
+    /* ── Login ── */
+    #login-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .login-card {
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: var(--shadow);
+    }
+    .login-logo { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+    .badge-super {
+      width: 48px; height: 48px; border-radius: 14px;
+      background: linear-gradient(135deg, #ff6b6b, #a855f7);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 800; color: #fff;
+    }
+    .login-title { font-size: 20px; font-weight: 700; }
+    .login-sub   { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .field-group { margin-bottom: 16px; }
+    .field-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+    .field-group input {
+      width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
+      color: var(--text); font-family: inherit; font-size: 14px;
+      outline: none; transition: border-color .2s;
+    }
+    .field-group input:focus { border-color: var(--accent); }
+    .btn-primary {
+      width: 100%; padding: 13px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #fff; font-family: inherit; font-size: 15px; font-weight: 700;
+      border: none; cursor: pointer; transition: opacity .2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-primary:hover { opacity: .88; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .auth-err {
+      margin-top: 14px; padding: 10px 14px; border-radius: 10px;
+      background: rgba(255,107,107,0.15); border: 1px solid rgba(255,107,107,0.3);
+      color: var(--danger); font-size: 13px; text-align: center;
+    }
+    .hidden { display: none !important; }
+
+    /* ── App shell ── */
+    #app-screen { min-height: 100vh; }
+
+    /* ── Topbar ── */
+    .topbar {
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      padding: 0 28px;
+      height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .topbar-brand { display: flex; align-items: center; gap: 10px; }
+    .topbar-badge {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #ff6b6b, #a855f7);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 16px;
+    }
+    .topbar-title { font-size: 16px; font-weight: 700; }
+    .topbar-sub   { font-size: 11px; color: var(--text-muted); }
+    .topbar-actions { display: flex; align-items: center; gap: 12px; }
+    .btn-ghost {
+      padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06); color: var(--text); font-size: 13px;
+      font-family: inherit; cursor: pointer; transition: background .2s;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.12); }
+    .server-time { font-size: 12px; color: var(--text-muted); }
+
+    /* ── Main layout ── */
+    .main { padding: 28px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── KPI cards ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 20px 22px;
+    }
+    .kpi-label { font-size: 12px; color: var(--text-muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+    .kpi-val   { font-size: 32px; font-weight: 800; margin-top: 6px; line-height: 1; }
+    .kpi-sub   { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── Section ── */
+    .section {
+      background: var(--surface);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 22px 24px;
+      margin-bottom: 24px;
+    }
+    .section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
+    }
+    .section-title { font-size: 15px; font-weight: 700; }
+
+    /* ── Table ── */
+    .tbl-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left; padding: 10px 14px; font-size: 12px;
+      font-weight: 700; color: var(--text-muted); text-transform: uppercase;
+      letter-spacing: .04em; border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    td {
+      padding: 12px 14px; font-size: 13px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.04); }
+
+    /* ── Badges ── */
+    .chip {
+      display: inline-block; padding: 3px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 700; letter-spacing: .03em;
+    }
+    .chip-danger  { background: rgba(255,107,107,0.18); color: var(--danger); }
+    .chip-success { background: rgba(109,210,143,0.18); color: var(--success); }
+
+    /* ── Action buttons ── */
+    .btn-danger {
+      padding: 6px 14px; border-radius: 8px; border: none;
+      background: rgba(255,107,107,0.2); color: var(--danger);
+      font-size: 12px; font-family: inherit; font-weight: 700;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-danger:hover { background: rgba(255,107,107,0.35); }
+
+    /* ── Newest user callout ── */
+    .callout {
+      padding: 14px 18px; border-radius: 12px;
+      background: rgba(63,193,201,0.1); border: 1px solid rgba(63,193,201,0.25);
+      font-size: 13px; color: var(--text-muted);
+    }
+    .callout strong { color: var(--text); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      padding: 12px 24px; border-radius: 12px; font-size: 14px; font-weight: 600;
+      z-index: 9999; transition: opacity .3s;
+      background: #1f3060; border: 1px solid rgba(255,255,255,.12);
+    }
+    #toast.success { background: rgba(109,210,143,0.2); border-color: var(--success); color: var(--success); }
+    #toast.error   { background: rgba(255,107,107,0.2); border-color: var(--danger);  color: var(--danger); }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.25);
+      border-top-color: #fff;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Confirm modal ── */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.55);
+      backdrop-filter: blur(4px); z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal-card {
+      background: #1a2a55; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 18px; padding: 32px 28px; width: 360px;
+      box-shadow: 0 32px 80px rgba(0,0,0,.4);
+    }
+    .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
+    .modal-body  { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.6; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .btn-sm {
+      padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 700;
+      font-family: inherit; cursor: pointer; transition: opacity .2s; border: none;
+    }
+    .btn-sm:hover { opacity: .82; }
+    .btn-confirm { background: var(--danger); color: #fff; }
+    .btn-cancel  { background: rgba(255,255,255,.1); color: var(--text); }
+
+    /* ── Refresh btn ── */
+    .btn-refresh {
+      padding: 7px 14px; border-radius: 8px; border: 1px solid rgba(63,193,201,0.4);
+      background: rgba(63,193,201,0.1); color: var(--accent);
+      font-size: 12px; font-family: inherit; font-weight: 700;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-refresh:hover { background: rgba(63,193,201,0.2); }
+    .empty-row { text-align: center; color: var(--text-muted); padding: 28px 0 !important; }
+
+    @media (max-width: 600px) {
+      .main { padding: 16px; }
+      .topbar { padding: 0 16px; }
+      .kpi-val { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════ LOGIN ══════ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="badge-super">S</div>
+      <div>
+        <div class="login-title">Superadmin Panel</div>
+        <div class="login-sub">S Advanced Attendance System</div>
+      </div>
+    </div>
+    <div class="field-group">
+      <label>Superadmin Secret Key</label>
+      <input id="secret-input" type="password" placeholder="Enter secret key…" autocomplete="off"
+             onkeydown="if(event.key==='Enter') doLogin()" />
+    </div>
+    <button class="btn-primary" id="btn-login" onclick="doLogin()">
+      <span id="login-label">Access Panel</span>
+      <div class="spinner hidden" id="login-spinner"></div>
+    </button>
+    <div id="login-err" class="auth-err hidden"></div>
+  </div>
+</div>
+
+<!-- ══════ APP ══════ -->
+<div id="app-screen" class="hidden">
+
+  <div class="topbar">
+    <div class="topbar-brand">
+      <div class="topbar-badge">S</div>
+      <div>
+        <div class="topbar-title">Superadmin</div>
+        <div class="topbar-sub">S Advanced Attendance</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span class="server-time" id="srv-time"></span>
+      <button class="btn-ghost" onclick="loadAll()">🔄 Refresh</button>
+      <button class="btn-ghost" onclick="doLogout()">Sign Out</button>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- KPIs -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Companies</div>
+        <div class="kpi-val" id="kpi-users">—</div>
+        <div class="kpi-sub">Registered admin accounts</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Total Staff</div>
+        <div class="kpi-val" id="kpi-staff">—</div>
+        <div class="kpi-sub">Across all companies</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Attendance Records</div>
+        <div class="kpi-val" id="kpi-att">—</div>
+        <div class="kpi-sub">All-time entries</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Today Check-ins</div>
+        <div class="kpi-val" id="kpi-today">—</div>
+        <div class="kpi-sub">Across all companies</div>
+      </div>
+    </div>
+
+    <!-- Newest user callout -->
+    <div class="callout hidden" id="newest-callout">
+      🆕 Newest company: <strong id="newest-company">—</strong>
+      &nbsp;·&nbsp; <span id="newest-email">—</span>
+      &nbsp;·&nbsp; Joined <span id="newest-date">—</span>
+    </div>
+
+    <!-- Users table -->
+    <div class="section" style="margin-top:20px">
+      <div class="section-head">
+        <div class="section-title">All Companies / Admins</div>
+        <button class="btn-refresh" onclick="loadAll()">Refresh</button>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Company</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>Joined</th>
+              <th>Staff</th>
+              <th>Records</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody">
+            <tr><td colspan="8" class="empty-row">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Confirm delete modal -->
+<div class="overlay hidden" id="confirm-overlay">
+  <div class="modal-card">
+    <div class="modal-title">⚠️ Delete Company Account</div>
+    <div class="modal-body" id="confirm-body">
+      This will permanently delete the company, all its staff, and all attendance records. This cannot be undone.
+    </div>
+    <div class="modal-actions">
+      <button class="btn-sm btn-cancel" onclick="closeConfirm()">Cancel</button>
+      <button class="btn-sm btn-confirm" id="btn-confirm-del">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+"use strict";
+
+const API_URL = "https://s-advanced-attendance-system-1.onrender.com";
+
+// ── Secret storage (session only) ──────────────────────────────────────────
+let _secret = sessionStorage.getItem("sa_secret") || "";
+
+function doLogin() {
+  const val = document.getElementById("secret-input").value.trim();
+  if (!val) return showErr("Please enter the superadmin secret key.");
+  _secret = val;
+  sessionStorage.setItem("sa_secret", val);
+  document.getElementById("btn-login").disabled = true;
+  document.getElementById("login-spinner").classList.remove("hidden");
+  document.getElementById("login-label").textContent = "Verifying…";
+
+  // Test by fetching stats
+  saFetch("/superadmin/stats")
+    .then(data => {
+      document.getElementById("login-screen").classList.add("hidden");
+      document.getElementById("app-screen").classList.remove("hidden");
+      renderStats(data);
+      loadUsers();
+    })
+    .catch(err => {
+      _secret = "";
+      sessionStorage.removeItem("sa_secret");
+      showErr(err.message || "Invalid secret key.");
+      document.getElementById("btn-login").disabled = false;
+      document.getElementById("login-spinner").classList.add("hidden");
+      document.getElementById("login-label").textContent = "Access Panel";
+    });
+}
+
+function doLogout() {
+  _secret = "";
+  sessionStorage.removeItem("sa_secret");
+  document.getElementById("app-screen").classList.add("hidden");
+  document.getElementById("login-screen").classList.remove("hidden");
+  document.getElementById("secret-input").value = "";
+}
+
+function showErr(msg) {
+  const el = document.getElementById("login-err");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+// ── API helper ─────────────────────────────────────────────────────────────
+async function saFetch(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Admin-Secret": _secret
+  };
+  const res  = await fetch(`${API_URL}${path}`, { headers, ...options });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+let _toastTimer = null;
+function toast(msg, type = "success") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = type;
+  el.classList.remove("hidden");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+}
+
+// ── Render stats ──────────────────────────────────────────────────────────
+function renderStats(data) {
+  document.getElementById("kpi-users").textContent  = data.total_users       ?? "—";
+  document.getElementById("kpi-staff").textContent  = data.total_staff       ?? "—";
+  document.getElementById("kpi-att").textContent    = data.total_attendance  ?? "—";
+  document.getElementById("kpi-today").textContent  = data.today_checkins    ?? "—";
+  document.getElementById("srv-time").textContent   = data.server_time
+    ? "Server: " + new Date(data.server_time + "Z").toLocaleTimeString() : "";
+
+  if (data.newest_user) {
+    const el = document.getElementById("newest-callout");
+    el.classList.remove("hidden");
+    document.getElementById("newest-company").textContent = data.newest_user.company;
+    document.getElementById("newest-email").textContent   = data.newest_user.email;
+    document.getElementById("newest-date").textContent    = data.newest_user.created_at
+      ? new Date(data.newest_user.created_at).toLocaleDateString() : "—";
+  }
+}
+
+// ── Load users table ───────────────────────────────────────────────────────
+async function loadUsers() {
+  const tbody = document.getElementById("users-tbody");
+  tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Loading…</td></tr>';
+  try {
+    const users = await saFetch("/superadmin/users");
+    tbody.innerHTML = "";
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-row">No companies registered yet.</td></tr>';
+      return;
+    }
+    users.forEach(u => {
+      const tr = document.createElement("tr");
+      const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : "—";
+      tr.innerHTML = `
+        <td><span style="color:var(--text-muted);font-size:12px">#${u.id}</span></td>
+        <td><strong>${esc(u.company)}</strong></td>
+        <td style="color:var(--text-muted)">${esc(u.email)}</td>
+        <td style="color:var(--text-muted)">${esc(u.phone || "—")}</td>
+        <td style="color:var(--text-muted);font-size:12px">${joined}</td>
+        <td><span class="chip chip-success">${u.staff_count}</span></td>
+        <td><span style="font-size:12px;color:var(--text-muted)">${u.attendance_count}</span></td>
+        <td>
+          <button class="btn-danger" onclick="confirmDelete(${u.id}, '${esc(u.company)}', '${esc(u.email)}')">
+            🗑 Delete
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-row" style="color:var(--danger)">${err.message}</td></tr>`;
+  }
+}
+
+async function loadAll() {
+  try {
+    const stats = await saFetch("/superadmin/stats");
+    renderStats(stats);
+  } catch (_) {}
+  await loadUsers();
+  toast("Refreshed!", "success");
+}
+
+// ── Delete flow ───────────────────────────────────────────────────────────
+let _deleteId = null;
+function confirmDelete(id, company, email) {
+  _deleteId = id;
+  document.getElementById("confirm-body").innerHTML =
+    `This will permanently delete <strong>${esc(company)}</strong> (${esc(email)}), all their staff, and all attendance records.<br><br>This <strong>cannot</strong> be undone.`;
+  document.getElementById("confirm-overlay").classList.remove("hidden");
+}
+
+function closeConfirm() {
+  _deleteId = null;
+  document.getElementById("confirm-overlay").classList.add("hidden");
+}
+
+document.getElementById("btn-confirm-del").addEventListener("click", async () => {
+  if (!_deleteId) return;
+  const id = _deleteId;
+  closeConfirm();
+  try {
+    await saFetch(`/superadmin/users/${id}`, { method: "DELETE" });
+    toast(`User #${id} deleted.`, "success");
+    loadAll();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+});
+
+// ── Escape HTML helper ─────────────────────────────────────────────────────
+function esc(str) {
+  return String(str ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// ── Auto-login if secret already stored ───────────────────────────────────
+if (_secret) {
+  document.getElementById("secret-input").value = "••••••••";
+  doLogin();
+}
+
+// ── Close confirm on overlay click ────────────────────────────────────────
+document.getElementById("confirm-overlay").addEventListener("click", e => {
+  if (e.target === document.getElementById("confirm-overlay")) closeConfirm();
+});
+</script>
+</body>
+</html>

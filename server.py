@@ -14,16 +14,20 @@ from datetime import datetime, timedelta, timezone
 app = Flask(__name__)
 
 # ── CORS ───────────────────────────────────────────────────────────────────
+ALLOWED_ORIGINS = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "https://s-high-adavnced-system.vercel.app"
+).split(",")
+
 CORS(app,
-     origins="https://s-high-adavnced-system.vercel.app",
+     origins=ALLOWED_ORIGINS,
      methods=["GET", "POST", "PUT", "DELETE"],
      allow_headers=["Content-Type", "Authorization"])
 
 # ── DATABASE ────────────────────────────────────────────────────────────────
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres.axqlgpdincfxbiagzjws:#blueysplash001@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
-)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set.")
 
 JWT_SECRET        = os.environ.get("JWT_SECRET",        "change-me-in-production-use-a-long-random-string")
 SUPERADMIN_SECRET = os.environ.get("SUPERADMIN_SECRET", "change-this-superadmin-secret")
@@ -254,8 +258,11 @@ def forbidden(e):    return jsonify({"error": str(e.description)}), 403
 def not_found(e):    return jsonify({"error": "Not found."}), 404
 @app.errorhandler(409)
 def conflict(e):     return jsonify({"error": str(e.description)}), 409
+@app.errorhandler(502)
+def bad_gateway(e): return jsonify({"error": str(e.description)}), 502
 @app.errorhandler(500)
 def server_error(e): return jsonify({"error": "Internal server error."}), 500
+
 
 
 # ===== Auth =================================================================
@@ -880,7 +887,7 @@ def push_to_integration():
         try:
             urllib.request.urlopen(req, timeout=5)
         except urllib.error.URLError as e:
-            abort(502, description=f"Webhook delivery failed: {e.reason}")
+            return jsonify({"error": f"Webhook delivery failed: {e.reason}"}), 502
         return jsonify({"ok": True, "type": "webhook"})
 
     # Google Sheets via Apps Script web app URL
@@ -894,7 +901,7 @@ def push_to_integration():
         try:
             urllib.request.urlopen(req, timeout=8)
         except urllib.error.URLError as e:
-            abort(502, description=f"Google Sheets push failed: {e.reason}")
+            return jsonify({"error": f"Google Sheets push failed: {e.reason}"}), 502
         return jsonify({"ok": True, "type": "google_sheets"})
 
     abort(400, description=f"Unknown integration type: {itype}")
@@ -988,6 +995,14 @@ def superadmin_delete_user(user_id):
     return jsonify({"message": f"User {user_id} deleted."})
 
 
-# ===== Run ==================================================================
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
+
+@app.route("/ping", methods=["GET"])
+def ping():
+    return jsonify({"pong": True})
+
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000)
