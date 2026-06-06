@@ -1300,16 +1300,6 @@ def superadmin_delete_user(user_id):
     return jsonify({"message": f"User {user_id} deleted."})
 
 
-# ===== Health ===============================================================
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
-
-@app.route("/ping", methods=["GET"])
-def ping():
-    return jsonify({"pong": True})
-
-
 # ===== Notice Board =========================================================
 @app.route("/notices", methods=["GET"])
 def get_notices():
