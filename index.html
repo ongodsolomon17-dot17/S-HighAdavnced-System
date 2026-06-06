@@ -10,45 +10,36 @@
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <!-- SheetJS for Excel export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <!-- Chart.js for analytics -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════════════════
-     AUTH SCREENS
-═══════════════════════════════════════════════════════ -->
+<!-- ══════ AUTH ══════ -->
 <div id="auth-shell" class="auth-shell">
   <div class="auth-blobs">
-    <div class="blob blob-1"></div>
-    <div class="blob blob-2"></div>
-    <div class="blob blob-3"></div>
+    <div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div>
   </div>
-
   <div class="auth-card">
     <div class="auth-logo">
-      <span class="badge-lg">S</span>
+      <span class="badge-lg" id="auth-badge">S</span>
       <div>
         <div class="auth-brand">S Advanced Attendance</div>
         <div class="auth-tagline">Secure multi-user attendance management</div>
       </div>
     </div>
 
-    <!-- Auth mode selector: admin vs staff -->
     <div class="auth-role-tabs">
-      <button class="role-tab active" id="rtab-admin"  onclick="switchAuthMode('admin')">🏢 Admin</button>
-      <button class="role-tab"        id="rtab-staff"  onclick="switchAuthMode('staff')">👤 Staff Portal</button>
+      <button class="role-tab active" id="rtab-admin" onclick="switchAuthMode('admin')">🏢 Admin</button>
+      <button class="role-tab"        id="rtab-staff" onclick="switchAuthMode('staff')">👤 Staff Portal</button>
     </div>
 
-    <!-- ── ADMIN PANEL ── -->
+    <!-- ADMIN PANEL -->
     <div id="admin-auth-panel">
       <div class="auth-tabs">
         <button class="auth-tab active" id="tab-login"    onclick="switchTab('login')">Sign In</button>
         <button class="auth-tab"        id="tab-register" onclick="switchTab('register')">Create Account</button>
       </div>
-
       <div id="form-login" class="auth-form">
         <div class="field-group">
           <label>Email Address</label>
@@ -62,11 +53,12 @@
           </div>
         </div>
         <button class="auth-submit" id="btn-login" onclick="handleLogin()">
-          <span>Sign In</span>
-          <div class="btn-spinner hidden" id="login-spinner"></div>
+          <span>Sign In</span><div class="btn-spinner hidden" id="login-spinner"></div>
         </button>
+        <p style="text-align:center;margin-top:12px">
+          <a href="#" class="forgot-link" onclick="showForgotPassword('admin')">Forgot password?</a>
+        </p>
       </div>
-
       <div id="form-register" class="auth-form hidden">
         <div class="field-group">
           <label>Company / Organisation Name <span class="req">*</span></label>
@@ -97,24 +89,22 @@
         </div>
         <div class="field-group">
           <label>Admin PIN <span class="req">*</span>
-            <span class="field-hint">4–8 digits — required before any changes</span>
+            <span class="field-hint">4–8 digits</span>
           </label>
           <input id="reg-pin" type="password" maxlength="8" placeholder="e.g. 1234" inputmode="numeric" pattern="\d*" />
         </div>
         <button class="auth-submit" id="btn-register" onclick="handleRegister()">
-          <span>Create Account</span>
-          <div class="btn-spinner hidden" id="register-spinner"></div>
+          <span>Create Account</span><div class="btn-spinner hidden" id="register-spinner"></div>
         </button>
       </div>
     </div>
 
-    <!-- ── STAFF PORTAL ── -->
+    <!-- STAFF PORTAL -->
     <div id="staff-auth-panel" class="hidden">
       <div class="auth-tabs">
         <button class="auth-tab active" id="stab-login"    onclick="switchStaffTab('login')">Sign In</button>
         <button class="auth-tab"        id="stab-register" onclick="switchStaffTab('register')">Link Account</button>
       </div>
-
       <div id="staff-form-login" class="auth-form">
         <div class="field-group">
           <label>Staff Email</label>
@@ -128,13 +118,14 @@
           </div>
         </div>
         <button class="auth-submit" id="btn-staff-login" onclick="handleStaffLogin()">
-          <span>Sign In</span>
-          <div class="btn-spinner hidden" id="staff-login-spinner"></div>
+          <span>Sign In</span><div class="btn-spinner hidden" id="staff-login-spinner"></div>
         </button>
+        <p style="text-align:center;margin-top:12px">
+          <a href="#" class="forgot-link" onclick="showForgotPassword('staff')">Forgot password?</a>
+        </p>
       </div>
-
       <div id="staff-form-register" class="auth-form hidden">
-        <p class="field-hint" style="margin-bottom:12px">Link your staff ID to create a personal login. Your admin must have already added you as staff.</p>
+        <p class="field-hint" style="margin-bottom:12px">Link your staff ID to create a personal login.</p>
         <div class="field-group">
           <label>Company Admin Email <span class="req">*</span></label>
           <input id="sreg-company-email" type="email" placeholder="admin@company.com" />
@@ -155,94 +146,131 @@
           </div>
         </div>
         <button class="auth-submit" id="btn-staff-register" onclick="handleStaffRegister()">
-          <span>Link Account</span>
-          <div class="btn-spinner hidden" id="staff-reg-spinner"></div>
+          <span>Link Account</span><div class="btn-spinner hidden" id="staff-reg-spinner"></div>
         </button>
       </div>
     </div>
-
     <div id="auth-message" class="auth-message hidden"></div>
   </div>
 </div>
 
 
-<!-- ══════════════════════════════════════════════════════
-     STAFF PORTAL (shown after staff login)
-═══════════════════════════════════════════════════════ -->
+<!-- ══════ STAFF SHELL ══════ -->
 <div id="staff-shell" class="app-shell hidden">
   <header class="app-header">
     <div class="header-left">
-      <span class="badge">S</span>
+      <span class="badge" id="staff-badge">S</span>
       <div class="header-titles">
         <h1 id="staff-company-display" class="company-headline">Company</h1>
         <p class="app-subtitle" id="staff-name-display">Staff Portal</p>
       </div>
     </div>
     <div class="header-actions">
+      <button class="pill" onclick="switchMainStaffTab('portal')">🏠 Portal</button>
+      <button class="pill" onclick="switchMainStaffTab('feedback')">💬 Feedback</button>
       <button class="pill danger-pill" onclick="handleLogout()">Sign Out</button>
     </div>
   </header>
   <main>
-    <!-- Staff QR display -->
-    <section class="grid-two">
-      <article class="card">
-        <h2>My QR Code</h2>
-        <p class="hint">Show this to the scanner for check-in / check-out.</p>
-        <div id="staff-qr-display" style="display:flex;justify-content:center;padding:16px 0"></div>
-        <div class="button-row" style="justify-content:center;margin-top:8px">
-          <a id="staff-qr-download" download="my-qr.png"
-             style="text-decoration:none;border-radius:14px;padding:10px 20px;font-weight:700;
-                    background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:white;display:inline-block;">
-            ⬇ Download QR
-          </a>
-        </div>
-      </article>
 
-      <!-- Staff self check-in -->
-      <article class="card">
-        <h2>Clock In / Out</h2>
-        <p class="hint" id="geo-status-staff">Getting your location…</p>
-        <div class="button-row" style="flex-direction:column;gap:12px;margin-top:16px">
-          <button class="accent" style="width:100%" id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">✅ Clock In</button>
-          <button class="accent" style="width:100%" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">🚪 Clock Out</button>
-        </div>
-      </article>
-    </section>
+    <!-- Staff Portal Tab -->
+    <div id="staff-tab-portal">
+      <!-- Notice banner -->
+      <div id="staff-notices-bar" style="display:none;margin-bottom:16px"></div>
 
-    <!-- Weekly summary for staff -->
-    <section>
-      <article class="card wide-card">
-        <div class="card-header">
-          <h2>My Attendance Summary</h2>
-          <div style="display:flex;gap:8px">
-            <button class="pill active" id="sbtn-weekly" onclick="loadStaffSummary('weekly')">Weekly</button>
-            <button class="pill"        id="sbtn-daily"  onclick="loadStaffSummary('daily')">Today</button>
+      <section class="grid-two">
+        <article class="card">
+          <h2>My QR Code</h2>
+          <p class="hint">Show this to the scanner for check-in / check-out.</p>
+          <div id="staff-qr-display" style="display:flex;justify-content:center;padding:16px 0"></div>
+          <div class="button-row" style="justify-content:center;margin-top:8px">
+            <a id="staff-qr-download" download="my-qr.png"
+               style="text-decoration:none;border-radius:14px;padding:10px 20px;font-weight:700;
+                      background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:white;display:inline-block;">
+              ⬇ Download QR
+            </a>
           </div>
+        </article>
+
+        <article class="card">
+          <h2>Clock In / Out</h2>
+          <p class="hint" id="geo-status-staff">Getting your location…</p>
+          <p class="hint" id="staff-schedule-display" style="margin-top:4px;color:var(--accent)"></p>
+          <!-- Shift selector (shown only if shifts configured) -->
+          <div id="shift-selector" class="hidden" style="margin:12px 0">
+            <label style="font-size:13px;color:var(--text-muted);font-weight:600">Select Shift</label>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <button class="pill active" id="shift-btn-day"   onclick="selectShift('day')">☀️ Day Shift</button>
+              <button class="pill"        id="shift-btn-night" onclick="selectShift('night')">🌙 Night Shift</button>
+            </div>
+          </div>
+          <div class="button-row" style="flex-direction:column;gap:12px;margin-top:16px">
+            <button class="accent" style="width:100%" id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">✅ Clock In</button>
+            <button class="accent" style="width:100%" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">🚪 Clock Out</button>
+          </div>
+        </article>
+      </section>
+
+      <section>
+        <article class="card wide-card">
+          <div class="card-header">
+            <h2>My Attendance Summary</h2>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="pill active" id="sbtn-daily"   onclick="loadStaffSummary('daily')">Today</button>
+              <button class="pill"        id="sbtn-weekly"  onclick="loadStaffSummary('weekly')">Weekly</button>
+              <button class="pill"        id="sbtn-monthly" onclick="loadStaffSummary('monthly')">Monthly</button>
+              <button class="pill"        id="sbtn-annual"  onclick="loadStaffSummary('annual')">Annual</button>
+            </div>
+          </div>
+          <div id="staff-summary-stats" class="summary-card-row"></div>
+          <div class="table-wrap" style="margin-top:16px">
+            <table id="staff-att-table">
+              <thead><tr><th>Date</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </div>
+
+    <!-- Feedback Tab -->
+    <div id="staff-tab-feedback" class="hidden">
+      <article class="card wide-card" style="max-width:600px;margin:0 auto">
+        <h2>💬 Send Feedback</h2>
+        <p class="hint">Share your thoughts, suggestions, or concerns with the system administrator.</p>
+        <div class="form-grid" style="margin-top:16px">
+          <label>Rating (optional)</label>
+          <div id="star-rating" style="display:flex;gap:8px;font-size:28px;cursor:pointer">
+            <span onclick="setRating(1)">⭐</span><span onclick="setRating(2)">⭐</span>
+            <span onclick="setRating(3)">⭐</span><span onclick="setRating(4)">⭐</span>
+            <span onclick="setRating(5)">⭐</span>
+          </div>
+          <label>Message <span class="req">*</span></label>
+          <textarea id="feedback-message" rows="5" maxlength="1000"
+            style="resize:vertical;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);
+                   background:rgba(255,255,255,0.07);color:var(--text);font-family:inherit;font-size:14px"
+            placeholder="Write your feedback here…"></textarea>
         </div>
-        <div id="staff-summary-panel">
-          <div class="summary-card-row" id="staff-summary-stats"></div>
+        <div class="button-row" style="margin-top:16px">
+          <button class="primary" onclick="submitFeedback()">
+            <span id="feedback-btn-label">Send Feedback</span>
+            <div class="btn-spinner hidden" id="feedback-spinner"></div>
+          </button>
         </div>
-        <div class="table-wrap" style="margin-top:16px">
-          <table id="staff-att-table">
-            <thead><tr><th>Date</th><th>Action</th><th>Time</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <p id="feedback-status" class="hint" style="margin-top:10px;text-align:center"></p>
       </article>
-    </section>
+    </div>
+
   </main>
   <footer class="app-footer"><p>S Advanced Attendance — Staff Portal</p></footer>
 </div>
 
 
-<!-- ══════════════════════════════════════════════════════
-     ADMIN APP SHELL
-═══════════════════════════════════════════════════════ -->
+<!-- ══════ ADMIN SHELL ══════ -->
 <div id="app-shell" class="app-shell hidden">
-
   <header class="app-header">
     <div class="header-left">
-      <span class="badge">S</span>
+      <span class="badge" id="admin-badge">S</span>
       <div class="header-titles">
         <h1 id="company-name-display" class="company-headline">Company Name</h1>
         <p class="app-subtitle">S Advanced Attendance System</p>
@@ -254,49 +282,50 @@
     </div>
   </header>
 
-  <!-- ── NAV TABS ── -->
   <nav class="app-nav">
-    <button class="nav-tab active" data-tab="dashboard"   onclick="switchMainTab('dashboard')">📊 Dashboard</button>
-    <button class="nav-tab"        data-tab="staff"        onclick="switchMainTab('staff')">👥 Staff</button>
-    <button class="nav-tab"        data-tab="attendance"   onclick="switchMainTab('attendance')">📋 Attendance</button>
-    <button class="nav-tab"        data-tab="reports"      onclick="switchMainTab('reports')">📑 Reports</button>
-    <button class="nav-tab"        data-tab="analytics"    onclick="switchMainTab('analytics')">🤖 AI Analytics</button>
-    <button class="nav-tab"        data-tab="settings"     onclick="switchMainTab('settings')">⚙️ Settings</button>
+    <button class="nav-tab active" data-tab="dashboard"  onclick="switchMainTab('dashboard')">📊 Dashboard</button>
+    <button class="nav-tab"        data-tab="staff"       onclick="switchMainTab('staff')">👥 Staff</button>
+    <button class="nav-tab"        data-tab="attendance"  onclick="switchMainTab('attendance')">📋 Attendance</button>
+    <button class="nav-tab"        data-tab="reports"     onclick="switchMainTab('reports')">📑 Reports</button>
+    <button class="nav-tab"        data-tab="analytics"   onclick="switchMainTab('analytics')">🤖 Analytics</button>
+    <button class="nav-tab"        data-tab="notices"     onclick="switchMainTab('notices')">📢 Notices</button>
+    <button class="nav-tab"        data-tab="settings"    onclick="switchMainTab('settings')">⚙️ Settings</button>
   </nav>
 
   <main>
 
-    <!-- ════════ DASHBOARD TAB ════════ -->
+    <!-- DASHBOARD -->
     <section id="tab-dashboard" class="tab-panel">
-      <!-- KPI cards -->
-      <div class="kpi-row" id="kpi-row">
+      <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-val" id="kpi-today">—</div><div class="kpi-label">Today Check-Ins</div></div>
         <div class="kpi-card"><div class="kpi-val" id="kpi-week">—</div><div class="kpi-label">This Week</div></div>
         <div class="kpi-card"><div class="kpi-val" id="kpi-staff">—</div><div class="kpi-label">Total Staff</div></div>
         <div class="kpi-card"><div class="kpi-val" id="kpi-clocked">—</div><div class="kpi-label">Currently In</div></div>
       </div>
-
-      <!-- Trend chart -->
       <article class="card wide-card">
         <h2>14-Day Check-In Trend</h2>
         <canvas id="trend-chart" height="90"></canvas>
       </article>
-
-      <!-- Weekly summary table -->
       <article class="card wide-card">
         <div class="card-header">
           <h2>Weekly Attendance Summary</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="pill active" id="dash-period-daily"   onclick="switchDashPeriod('daily')">Today</button>
+            <button class="pill"        id="dash-period-weekly"  onclick="switchDashPeriod('weekly')">Weekly</button>
+            <button class="pill"        id="dash-period-monthly" onclick="switchDashPeriod('monthly')">Monthly</button>
+            <button class="pill"        id="dash-period-annual"  onclick="switchDashPeriod('annual')">Annual</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table id="summary-table">
-            <thead><tr><th>Staff</th><th>Hours</th><th>Days Present</th><th>Grade</th><th>% of Expected</th></tr></thead>
+            <thead><tr><th>Staff</th><th>Hours</th><th>Days Present</th><th>Punctuality</th><th>Attendance %</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </article>
     </section>
 
-    <!-- ════════ STAFF TAB ════════ -->
+    <!-- STAFF -->
     <section id="tab-staff" class="tab-panel hidden">
       <div class="grid-two">
         <article class="card">
@@ -306,28 +335,26 @@
             <button id="btn-cancel-update" type="button">Cancel</button>
           </div>
           <div id="staff-form" class="form-grid">
-            <label for="staff-name">Name <span style="color:var(--danger)">*</span></label>
+            <label>Name <span style="color:var(--danger)">*</span></label>
             <input id="staff-name"  type="text"  maxlength="80"  autocomplete="off" placeholder="Full name" />
-            <label for="staff-email">Email</label>
+            <label>Email</label>
             <input id="staff-email" type="email" maxlength="120" autocomplete="off" placeholder="email@example.com" />
-            <label for="staff-phone">Phone</label>
+            <label>Phone</label>
             <input id="staff-phone" type="tel"   maxlength="30"  autocomplete="off" placeholder="+234 000 0000" />
-            <label for="staff-id">Staff ID <span style="color:var(--text-muted); font-size:0.8rem">(auto-generated)</span></label>
+            <label>Staff ID <span style="color:var(--text-muted);font-size:0.8rem">(auto-generated)</span></label>
             <input id="staff-id"    type="text"  maxlength="20"  readonly placeholder="Auto" />
             <div class="button-row">
               <button type="button" id="btn-submit-staff" class="primary">Add Staff</button>
             </div>
           </div>
-          <p class="hint">Right-click (PC) or long-press (mobile) a staff row to update, remove, or generate a QR code.</p>
+          <p class="hint">Right-click (PC) or long-press (mobile) a row to update, remove, or generate QR.</p>
         </article>
 
         <article class="card">
           <h2>Attendance Actions</h2>
           <div class="form-grid">
-            <label for="attendance-staff">Select Staff</label>
-            <select id="attendance-staff">
-              <option value="">-- select staff --</option>
-            </select>
+            <label>Select Staff</label>
+            <select id="attendance-staff"><option value="">-- select staff --</option></select>
           </div>
           <div class="button-row">
             <button id="btn-scan-checkin"  class="accent">📷 Scan QR Check-In</button>
@@ -337,10 +364,9 @@
             <button id="btn-manual-checkin"  class="secondary">✅ Manual Check-In</button>
             <button id="btn-manual-checkout" class="secondary">🚪 Manual Check-Out</button>
           </div>
+          <p class="hint" id="admin-geo-status" style="margin-top:8px"></p>
         </article>
       </div>
-
-      <!-- Staff table -->
       <article class="card wide-card">
         <div class="card-header">
           <h2>Registered Staff</h2>
@@ -356,60 +382,55 @@
       </article>
     </section>
 
-    <!-- ════════ ATTENDANCE TAB ════════ -->
+    <!-- ATTENDANCE -->
     <section id="tab-attendance" class="tab-panel hidden">
       <article class="card wide-card">
         <div class="card-header">
           <h2>Attendance Log</h2>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span id="attendance-count" class="tag">0 entries</span>
-            <button class="pill" id="btn-view-all-entries" onclick="openViewAll()">📋 View All</button>
+            <button class="pill" onclick="openViewAll()">📋 View All</button>
           </div>
         </div>
         <div class="table-wrap">
           <table id="attendance-table">
-            <thead><tr><th>Date</th><th>Staff</th><th>Action</th><th>Time</th></tr></thead>
+            <thead><tr><th>Date</th><th>Staff</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </article>
     </section>
 
-    <!-- ════════ REPORTS TAB ════════ -->
+    <!-- REPORTS -->
     <section id="tab-reports" class="tab-panel hidden">
       <article class="card wide-card">
         <h2>Generate Report</h2>
         <div class="form-grid" style="max-width:500px">
-          <label>From Date</label>
-          <input type="date" id="report-from" />
-          <label>To Date</label>
-          <input type="date" id="report-to" />
+          <label>From Date</label><input type="date" id="report-from" />
+          <label>To Date</label>  <input type="date" id="report-to" />
           <label>Staff (optional)</label>
-          <select id="report-staff">
-            <option value="">All staff</option>
-          </select>
+          <select id="report-staff"><option value="">All staff</option></select>
         </div>
         <div class="button-row" style="margin-top:16px">
           <button class="primary" onclick="generateReport()">📊 Generate</button>
-          <button class="accent"  onclick="exportExcel()">📥 Export Excel</button>
-          <button class="accent"  onclick="exportPDF()">📄 Export PDF</button>
+          <button class="accent"  onclick="exportExcel()">📥 Excel</button>
+          <button class="accent"  onclick="exportPDF()">📄 PDF</button>
         </div>
       </article>
       <article class="card wide-card">
         <div class="card-header">
-          <h2>Report Results</h2>
-          <span id="report-count" class="tag">—</span>
+          <h2>Report Results</h2><span id="report-count" class="tag">—</span>
         </div>
         <div class="table-wrap">
           <table id="report-table">
-            <thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th></tr></thead>
+            <thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </article>
     </section>
 
-    <!-- ════════ AI ANALYTICS TAB ════════ -->
+    <!-- ANALYTICS -->
     <section id="tab-analytics" class="tab-panel hidden">
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-val" id="ai-today">—</div><div class="kpi-label">Today Check-Ins</div></div>
@@ -426,32 +447,124 @@
           <h2>⚠️ Low Attendance (30d)</h2>
           <ul class="performer-list" id="low-attendance"></ul>
         </article>
+        <article class="card">
+          <h2>🟢 Still Clocked In Today</h2>
+          <ul class="performer-list" id="still-clocked"></ul>
+        </article>
+        <article class="card">
+          <h2>⏰ Punctuality Breakdown (30d)</h2>
+          <canvas id="lateness-chart" height="140"></canvas>
+        </article>
       </div>
-      <article class="card wide-card">
-        <h2>Still Clocked In Today</h2>
-        <ul class="performer-list" id="still-clocked"></ul>
-      </article>
       <article class="card wide-card">
         <h2>Attendance Frequency (30d)</h2>
         <canvas id="freq-chart" height="80"></canvas>
       </article>
     </section>
 
-    <!-- ════════ SETTINGS TAB ════════ -->
+    <!-- NOTICES -->
+    <section id="tab-notices" class="tab-panel hidden">
+      <div class="grid-two">
+        <article class="card">
+          <h2>📢 Post a Notice</h2>
+          <div class="form-grid">
+            <label>Title <span class="req">*</span></label>
+            <input id="notice-title" type="text" maxlength="120" placeholder="Notice title" />
+            <label>Message <span class="req">*</span></label>
+            <textarea id="notice-body" rows="4" maxlength="500"
+              style="resize:vertical;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);
+                     background:rgba(255,255,255,0.07);color:var(--text);font-family:inherit;font-size:14px"
+              placeholder="Write your notice here…"></textarea>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="notice-pinned" />
+              <span>📌 Pin this notice</span>
+            </label>
+          </div>
+          <div class="button-row" style="margin-top:12px">
+            <button class="primary" onclick="postNotice()">Post Notice</button>
+          </div>
+        </article>
+        <article class="card">
+          <h2>Active Notices</h2>
+          <div id="notices-list"><p class="hint">No notices yet.</p></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
     <section id="tab-settings" class="tab-panel hidden">
       <div class="grid-two">
+
+        <!-- Profile -->
+        <article class="card">
+          <h2>👤 Company Profile</h2>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+            <div id="profile-pic-preview" style="width:72px;height:72px;border-radius:50%;
+                 background:linear-gradient(135deg,#3fc1c9,#2c9ea1);display:flex;align-items:center;
+                 justify-content:center;font-size:28px;font-weight:800;color:#fff;overflow:hidden;flex-shrink:0">S</div>
+            <div>
+              <p class="hint">Upload your company logo. It will appear across all staff interfaces.</p>
+              <div class="button-row" style="margin-top:8px">
+                <label class="primary" style="cursor:pointer;padding:8px 16px;border-radius:10px;
+                       background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:#fff;font-weight:700;font-size:13px">
+                  📷 Upload Logo
+                  <input type="file" id="profile-pic-input" accept="image/jpeg,image/png,image/webp"
+                         style="display:none" onchange="handleProfilePicUpload(this)" />
+                </label>
+                <button class="secondary" onclick="removeProfilePic()">🗑 Remove</button>
+              </div>
+            </div>
+          </div>
+          <div id="profile-pic-status" class="hint"></div>
+        </article>
+
+        <!-- Edit Profile -->
+        <article class="card">
+          <h2>✏️ Edit Profile</h2>
+          <p class="hint">PIN verification required to unlock editing.</p>
+          <div id="profile-edit-locked" style="margin-top:12px">
+            <button class="primary" onclick="unlockProfileEdit()">🔓 Unlock with PIN</button>
+          </div>
+          <div id="profile-edit-form" class="hidden">
+            <div class="form-grid" style="margin-top:12px">
+              <label>Company Name</label>
+              <input id="edit-company" type="text" maxlength="80" placeholder="Company name" />
+              <label>Email</label>
+              <input id="edit-email" type="email" maxlength="120" placeholder="Email address" />
+              <label>Phone</label>
+              <input id="edit-phone" type="tel" maxlength="30" placeholder="Phone number" />
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="primary" onclick="saveProfileEdit()">💾 Save Changes</button>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);margin:16px 0" />
+            <div class="form-grid">
+              <label>New Password</label>
+              <div class="input-eye">
+                <input id="edit-new-password" type="password" maxlength="128" placeholder="Leave blank to keep current" />
+                <button type="button" class="eye-btn" onclick="toggleEye('edit-new-password',this)">👁</button>
+              </div>
+              <label>New PIN</label>
+              <input id="edit-new-pin" type="password" maxlength="8" placeholder="Leave blank to keep current" inputmode="numeric" />
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="accent" onclick="savePasswordPin()">🔑 Update Password/PIN</button>
+            </div>
+          </div>
+          <p id="profile-edit-status" class="hint" style="margin-top:8px"></p>
+        </article>
 
         <!-- Geofence -->
         <article class="card">
           <h2>📍 Geofence Settings</h2>
-          <p class="hint">Set an office location. Staff must be within the radius to clock in/out from their portal.</p>
+          <p class="hint">Staff must be within the radius to clock in/out.</p>
           <div class="form-grid">
             <label>Office Latitude</label>
             <input id="geo-lat" type="number" step="any" placeholder="e.g. 4.8156" />
             <label>Office Longitude</label>
             <input id="geo-lng" type="number" step="any" placeholder="e.g. 7.0498" />
             <label>Allowed Radius (metres)</label>
-            <input id="geo-radius" type="number" min="50" max="5000" value="200" placeholder="200" />
+            <input id="geo-radius" type="number" min="50" max="5000" value="200" />
           </div>
           <div class="button-row" style="margin-top:12px">
             <button class="primary" onclick="detectMyLocation()">📡 Use My Location</button>
@@ -460,10 +573,62 @@
           <p class="hint" id="geo-saved-status" style="margin-top:8px"></p>
         </article>
 
-        <!-- External sheet integration -->
+        <!-- Work Schedule -->
+        <article class="card">
+          <h2>🕐 Work Schedule</h2>
+          <p class="hint">Set expected check-in/out times for punctuality grading.</p>
+          <div class="form-grid">
+            <label>Expected Check-In Time</label>
+            <input id="sched-checkin" type="time" value="09:00" />
+            <label>Expected Check-Out Time</label>
+            <input id="sched-checkout" type="time" value="17:00" />
+          </div>
+          <div style="margin-top:14px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px">
+              <input type="checkbox" id="enable-night-shift" onchange="toggleNightShift()" />
+              <span style="font-size:13px;font-weight:600">🌙 Enable Night Shift</span>
+            </label>
+            <div id="night-shift-fields" class="hidden">
+              <div class="form-grid">
+                <label>Night Shift Check-In</label>
+                <input id="sched-night-checkin" type="time" value="22:00" />
+                <label>Night Shift Check-Out</label>
+                <input id="sched-night-checkout" type="time" value="06:00" />
+              </div>
+            </div>
+          </div>
+          <div class="button-row" style="margin-top:12px">
+            <button class="accent" onclick="saveSchedule()">💾 Save Schedule</button>
+          </div>
+          <p class="hint" id="sched-status" style="margin-top:8px"></p>
+        </article>
+
+        <!-- Pending Device Requests -->
+        <article class="card wide-card" style="grid-column:1/-1">
+          <div class="card-header">
+            <h2>📱 Pending Device Requests
+              <span id="pending-devices-badge" class="hidden"
+                style="display:inline-block;background:var(--danger);color:#fff;
+                       border-radius:20px;padding:2px 10px;font-size:12px;
+                       font-weight:700;margin-left:8px">0</span>
+            </h2>
+            <button class="pill" onclick="loadPendingDevices()">🔄 Refresh</button>
+          </div>
+          <p class="hint">Staff trying to log in from unrecognised devices. Approve for 20-hour temporary access or reject.</p>
+          <div id="pending-devices-list" style="margin-top:12px"><p class="hint">Loading…</p></div>
+        </article>
+
+        <!-- Trusted Devices -->
+        <article class="card">
+          <h2>🔒 My Trusted Devices</h2>
+          <p class="hint">Your own verified admin devices.</p>
+          <div id="devices-list"><p class="hint">Loading…</p></div>
+        </article>
+
+        <!-- External Integration -->
         <article class="card">
           <h2>🔗 External Integration</h2>
-          <p class="hint">Link a Google Sheet (via Apps Script) or any webhook URL. Every attendance event will be pushed automatically.</p>
+          <p class="hint">Link a Google Sheet or webhook. Every attendance event will be pushed automatically.</p>
           <div class="form-grid">
             <label>Type</label>
             <select id="int-type" onchange="toggleIntFields()">
@@ -478,58 +643,36 @@
             <button class="secondary" onclick="removeIntegration()">🗑 Remove</button>
           </div>
           <div id="int-status" class="hint" style="margin-top:8px"></div>
-          <details style="margin-top:16px">
-            <summary class="hint" style="cursor:pointer">📋 Google Sheets setup guide</summary>
-            <div class="hint" style="margin-top:8px;line-height:1.7">
-              1. Open your Google Sheet → Extensions → Apps Script<br>
-              2. Paste the Apps Script below and deploy as a Web App (Anyone can access):<br>
-              <pre style="background:rgba(255,255,255,0.05);padding:10px;border-radius:8px;font-size:0.75rem;overflow:auto;margin-top:6px">function doPost(e) {
-  var data = JSON.parse(e.postData.contents);
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(['Date','Staff ID','Name','Action','Time','Lat','Lng']);
-  }
-  var ts = new Date(data.timestamp);
-  sheet.appendRow([
-    ts.toLocaleDateString(), data.staff_id, data.name || '',
-    data.action, ts.toLocaleTimeString(),
-    data.lat || '', data.lng || ''
-  ]);
-  return ContentService.createTextOutput('ok');
-}</pre>
-              3. Copy the Web App URL and paste it above.
-            </div>
-          </details>
         </article>
+
       </div>
     </section>
-
   </main>
 
   <footer class="app-footer">
-    <p>Your data is encrypted and stored securely. All changes require admin PIN verification.</p>
+    <p>Your data is encrypted and stored securely.</p>
   </footer>
 </div>
 
 
-<!-- ══════════════════════════════════════════════ TOAST ══ -->
+<!-- ══════ TOAST ══════ -->
 <div id="toast" class="toast hidden"></div>
 
-<!-- ══════════════════════════════════════════════ CONTEXT MENU ══ -->
-<div id="context-menu" class="context-menu hidden" role="menu">
+<!-- ══════ CONTEXT MENU ══════ -->
+<div id="context-menu" class="context-menu hidden">
   <button data-action="update">✏️ Update</button>
   <button data-action="remove">🗑️ Remove</button>
   <button data-action="qr">📱 Generate QR</button>
 </div>
 
-<!-- ══════════════════════════════════════════════ OVERLAY ══ -->
+<!-- ══════ OVERLAY ══════ -->
 <div id="modal-overlay" class="modal-overlay hidden"></div>
 
-<!-- ══════════════════════════════════════════════ PIN MODAL ══ -->
-<div id="pin-modal" class="modal pin-modal hidden" role="dialog" aria-modal="true" aria-label="Admin PIN">
+<!-- ══════ PIN MODAL ══════ -->
+<div id="pin-modal" class="modal pin-modal hidden">
   <div class="modal-header">
     <h3>🔒 Admin PIN Required</h3>
-    <button class="modal-close" id="btn-close-pin" aria-label="Close">×</button>
+    <button class="modal-close" id="btn-close-pin">×</button>
   </div>
   <p class="pin-desc">Enter your admin PIN to authorise this action.</p>
   <div class="pin-inputs" id="pin-inputs">
@@ -545,11 +688,61 @@
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════ SCANNER MODAL ══ -->
-<div id="scanner-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scanner-title">
+<!-- ══════ FORGOT PASSWORD MODAL ══════ -->
+<div id="forgot-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>🔑 Reset Password</h3>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div id="forgot-step-1">
+    <p class="hint" style="margin-bottom:12px">Enter your email to receive a 6-digit reset code.</p>
+    <div class="field-group">
+      <label>Email Address</label>
+      <input id="forgot-email" type="email" placeholder="your@email.com" />
+    </div>
+    <div class="modal-actions">
+      <button class="primary" onclick="sendResetCode()">Send Code</button>
+    </div>
+  </div>
+  <div id="forgot-step-2" class="hidden">
+    <p class="hint" style="margin-bottom:12px">Enter the 6-digit code sent to your email.</p>
+    <div class="field-group">
+      <label>Verification Code</label>
+      <input id="forgot-code" type="text" maxlength="6" placeholder="123456" inputmode="numeric" style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center" />
+    </div>
+    <div class="field-group">
+      <label>New Password</label>
+      <div class="input-eye">
+        <input id="forgot-new-password" type="password" maxlength="128" placeholder="Min 8 characters" />
+        <button type="button" class="eye-btn" onclick="toggleEye('forgot-new-password',this)">👁</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="primary" onclick="confirmResetCode()">Reset Password</button>
+    </div>
+  </div>
+  <p id="forgot-status" class="hint" style="margin-top:10px;text-align:center"></p>
+</div>
+
+<!-- ══════ DEVICE TRUST MODAL ══════ -->
+<div id="device-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>🔒 New Device Detected</h3>
+  </div>
+  <p class="hint" style="margin-bottom:16px">
+    This device hasn't been verified before. Would you like to trust this device for 30 days?
+  </p>
+  <div class="modal-actions">
+    <button class="primary"   onclick="trustThisDevice()">✅ Trust This Device</button>
+    <button class="secondary" onclick="closeModal()">Not Now</button>
+  </div>
+</div>
+
+<!-- ══════ SCANNER MODAL ══════ -->
+<div id="scanner-modal" class="modal hidden">
   <div class="modal-header">
     <h3 id="scanner-title">QR Scanner</h3>
-    <button class="modal-close" id="btn-close-scanner" aria-label="Close scanner">×</button>
+    <button class="modal-close" id="btn-close-scanner">×</button>
   </div>
   <div id="scanner-container"></div>
   <div class="modal-actions">
@@ -557,11 +750,11 @@
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════ QR MODAL ══ -->
-<div id="qr-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="QR Code">
+<!-- ══════ QR MODAL ══════ -->
+<div id="qr-modal" class="modal hidden">
   <div class="modal-header">
     <h3>Staff QR Code</h3>
-    <button class="modal-close" id="btn-close-qr" aria-label="Close QR">×</button>
+    <button class="modal-close" id="btn-close-qr">×</button>
   </div>
   <div class="qr-preview" id="qr-preview"></div>
   <div class="modal-actions">
@@ -573,27 +766,27 @@
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════ VIEW-ALL ENTRIES MODAL ══ -->
-<div id="viewall-modal" class="modal modal-wide hidden" role="dialog" aria-modal="true" aria-label="All Entries">
+<!-- ══════ VIEW-ALL MODAL ══════ -->
+<div id="viewall-modal" class="modal modal-wide hidden">
   <div class="modal-header">
     <h3>📋 All Attendance Entries</h3>
-    <button class="modal-close" id="btn-close-viewall" aria-label="Close">×</button>
+    <button class="modal-close" id="btn-close-viewall">×</button>
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
-    <input type="text" id="viewall-search" placeholder="Search by name or ID…" style="flex:1;min-width:180px;padding:8px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:var(--text)" oninput="filterViewAll()" />
+    <input type="text" id="viewall-search" placeholder="Search by name or ID…"
+           style="flex:1;min-width:180px;padding:8px 14px;border-radius:10px;
+                  border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:var(--text)"
+           oninput="filterViewAll()" />
     <button class="accent" onclick="exportViewAllExcel()">📥 Excel</button>
     <button class="accent" onclick="exportViewAllPDF()">📄 PDF</button>
-    <button class="secondary" id="btn-link-sheet" onclick="openIntegrationFromViewAll()">🔗 Link External Sheet</button>
   </div>
   <div class="table-wrap" style="max-height:55vh;overflow-y:auto">
     <table id="viewall-table">
-      <thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th><th>Location</th></tr></thead>
+      <thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th><th>Status</th><th>Location</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
-  <div class="modal-actions">
-    <span id="viewall-count" class="tag">—</span>
-  </div>
+  <div class="modal-actions"><span id="viewall-count" class="tag">—</span></div>
 </div>
 
 <script src="app.js"></script>

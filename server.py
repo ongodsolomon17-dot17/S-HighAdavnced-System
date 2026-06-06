@@ -9,6 +9,9 @@ import hmac
 import base64
 import json
 import time
+import math
+import random
+import string
 from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
@@ -24,13 +27,15 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE"],
      allow_headers=["Content-Type", "Authorization"])
 
-# ── DATABASE ────────────────────────────────────────────────────────────────
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# ── CONFIG ──────────────────────────────────────────────────────────────────
+DATABASE_URL      = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set.")
 
-JWT_SECRET        = os.environ.get("JWT_SECRET",        "change-me-in-production-use-a-long-random-string")
+JWT_SECRET        = os.environ.get("JWT_SECRET",        "change-me-in-production")
 SUPERADMIN_SECRET = os.environ.get("SUPERADMIN_SECRET", "change-this-superadmin-secret")
+RESEND_API_KEY    = os.environ.get("RESEND_API_KEY",    "")
+FROM_EMAIL        = os.environ.get("FROM_EMAIL",        "onboarding@resend.dev")
 
 # ── Input constraints ──────────────────────────────────────────────────────
 MAX_NAME_LEN     = 80
@@ -101,6 +106,43 @@ def check_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(hash_password(password, salt), stored)
 
 
+# ===== Haversine ============================================================
+def haversine_m(lat1, lng1, lat2, lng2):
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lng2 - lng1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+
+# ===== Email (Resend) =======================================================
+def send_email(to: str, subject: str, html: str) -> bool:
+    if not RESEND_API_KEY:
+        return False
+    import urllib.request, urllib.error
+    payload = json.dumps({
+        "from":    FROM_EMAIL,
+        "to":      [to],
+        "subject": subject,
+        "html":    html
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type":  "application/json"
+        },
+        method="POST"
+    )
+    try:
+        urllib.request.urlopen(req, timeout=8)
+        return True
+    except urllib.error.URLError:
+        return False
+
+
 # ===== Database =============================================================
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
@@ -110,23 +152,23 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    # Company admin accounts
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id         SERIAL PRIMARY KEY,
-            company    TEXT    NOT NULL,
-            email      TEXT    NOT NULL UNIQUE,
-            phone      TEXT,
-            password   TEXT    NOT NULL,
-            pin        TEXT    NOT NULL,
-            created_at TEXT    NOT NULL,
-            geofence_lat   DOUBLE PRECISION,
-            geofence_lng   DOUBLE PRECISION,
-            geofence_radius INTEGER DEFAULT 200
+            id              SERIAL PRIMARY KEY,
+            company         TEXT    NOT NULL,
+            email           TEXT    NOT NULL UNIQUE,
+            phone           TEXT,
+            password        TEXT    NOT NULL,
+            pin             TEXT    NOT NULL,
+            created_at      TEXT    NOT NULL,
+            geofence_lat    DOUBLE PRECISION,
+            geofence_lng    DOUBLE PRECISION,
+            geofence_radius INTEGER DEFAULT 200,
+            checkin_time    TEXT DEFAULT '09:00',
+            checkout_time   TEXT DEFAULT '17:00'
         )
     """)
 
-    # Staff members (registered by admin)
     c.execute("""
         CREATE TABLE IF NOT EXISTS staff (
             id      TEXT    NOT NULL,
@@ -139,7 +181,6 @@ def init_db():
         )
     """)
 
-    # Staff sub-accounts (self-registered by staff)
     c.execute("""
         CREATE TABLE IF NOT EXISTS staff_accounts (
             id           SERIAL  PRIMARY KEY,
@@ -153,7 +194,6 @@ def init_db():
         )
     """)
 
-    # Attendance records
     c.execute("""
         CREATE TABLE IF NOT EXISTS attendance (
             id        SERIAL PRIMARY KEY,
@@ -167,7 +207,6 @@ def init_db():
         )
     """)
 
-    # External sheet/DB integration config (per company)
     c.execute("""
         CREATE TABLE IF NOT EXISTS external_integrations (
             id          SERIAL  PRIMARY KEY,
@@ -179,21 +218,63 @@ def init_db():
         )
     """)
 
-    # Add new columns to existing users table if they don't exist (migration)
-    for col, definition in [
-        ("geofence_lat",    "DOUBLE PRECISION"),
-        ("geofence_lng",    "DOUBLE PRECISION"),
-        ("geofence_radius", "INTEGER DEFAULT 200"),
-    ]:
-        try:
-            c.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition}")
-        except Exception:
-            conn.rollback()
 
-    # Add lat/lng to attendance if missing (migration)
-    for col, definition in [("lat", "DOUBLE PRECISION"), ("lng", "DOUBLE PRECISION")]:
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS notices (
+            id         SERIAL PRIMARY KEY,
+            user_id    INTEGER NOT NULL,
+            title      TEXT    NOT NULL,
+            body       TEXT    NOT NULL,
+            created_at TEXT    NOT NULL,
+            pinned     BOOLEAN DEFAULT FALSE,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS trusted_devices (
+            id                  SERIAL PRIMARY KEY,
+            user_id             INTEGER NOT NULL,
+            role                TEXT    NOT NULL DEFAULT 'admin',
+            staff_id            TEXT,
+            device_fingerprint  TEXT    NOT NULL,
+            device_name         TEXT,
+            created_at          TEXT    NOT NULL,
+            last_used           TEXT,
+            expires_at          TEXT,
+            status              TEXT    NOT NULL DEFAULT 'trusted',
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE (user_id, role, device_fingerprint)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id         SERIAL PRIMARY KEY,
+            email      TEXT   NOT NULL,
+            role       TEXT   NOT NULL DEFAULT 'admin',
+            code       TEXT   NOT NULL,
+            expires_at TEXT   NOT NULL,
+            used       BOOLEAN DEFAULT FALSE
+        )
+    """)
+
+    # Migrations for existing tables
+    migrations = [
+        ("users", "geofence_lat",    "DOUBLE PRECISION"),
+        ("users", "geofence_lng",    "DOUBLE PRECISION"),
+        ("users", "geofence_radius", "INTEGER DEFAULT 200"),
+        ("users", "profile_picture", "TEXT"),
+        ("trusted_devices", "staff_id", "TEXT"),
+        ("trusted_devices", "status",   "TEXT DEFAULT 'trusted'"),
+        ("users", "checkin_time",    "TEXT DEFAULT '09:00'"),
+        ("users", "checkout_time",   "TEXT DEFAULT '17:00'"),
+        ("attendance", "lat",        "DOUBLE PRECISION"),
+        ("attendance", "lng",        "DOUBLE PRECISION"),
+    ]
+    for table, col, definition in migrations:
         try:
-            c.execute(f"ALTER TABLE attendance ADD COLUMN IF NOT EXISTS {col} {definition}")
+            c.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {definition}")
         except Exception:
             conn.rollback()
 
@@ -236,15 +317,27 @@ def require_superadmin():
     if not hmac.compare_digest(auth, SUPERADMIN_SECRET):
         abort(403, description="Forbidden.")
 
-def haversine_m(lat1, lng1, lat2, lng2):
-    """Distance between two lat/lng points in metres."""
-    import math
-    R = 6_371_000
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lng2 - lng1)
-    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
+def compute_lateness_grade(checkin_ts: datetime, expected_time_str: str):
+    """
+    Returns (status_label, minutes_late) based on actual vs expected check-in time.
+    expected_time_str: 'HH:MM' in 24h format
+    """
+    try:
+        h, m = map(int, expected_time_str.split(":"))
+        expected = checkin_ts.replace(hour=h, minute=m, second=0, microsecond=0)
+        diff_minutes = (checkin_ts - expected).total_seconds() / 60
+        if diff_minutes <= 0:
+            return "Excellent", int(diff_minutes)
+        elif diff_minutes <= 5:
+            return "Good", int(diff_minutes)
+        elif diff_minutes <= 10:
+            return "Fair", int(diff_minutes)
+        elif diff_minutes <= 15:
+            return "Late", int(diff_minutes)
+        else:
+            return "Very Late", int(diff_minutes)
+    except Exception:
+        return "Unknown", 0
 
 
 # ===== Error handlers =======================================================
@@ -259,10 +352,9 @@ def not_found(e):    return jsonify({"error": "Not found."}), 404
 @app.errorhandler(409)
 def conflict(e):     return jsonify({"error": str(e.description)}), 409
 @app.errorhandler(502)
-def bad_gateway(e): return jsonify({"error": str(e.description)}), 502
+def bad_gateway(e):  return jsonify({"error": str(e.description)}), 502
 @app.errorhandler(500)
 def server_error(e): return jsonify({"error": "Internal server error."}), 500
-
 
 
 # ===== Auth =================================================================
@@ -320,10 +412,8 @@ def login():
     return jsonify({"token": token, "company": user["company"], "user_id": user["id"], "role": "admin"})
 
 
-# ── Staff sub-account login ─────────────────────────────────────────────────
 @app.route("/auth/staff-login", methods=["POST"])
 def staff_login():
-    """Staff log in with their own email/password to view their own portal."""
     data     = require_json()
     email    = sanitize(data.get("email"),    MAX_EMAIL_LEN,    "email")
     password = sanitize(data.get("password"), MAX_PASSWORD_LEN, "password")
@@ -332,7 +422,8 @@ def staff_login():
     conn = get_db()
     c    = conn.cursor()
     c.execute("""
-        SELECT sa.*, s.name, u.company, u.geofence_lat, u.geofence_lng, u.geofence_radius
+        SELECT sa.*, s.name, u.company, u.geofence_lat, u.geofence_lng, u.geofence_radius,
+               u.checkin_time, u.checkout_time
         FROM staff_accounts sa
         JOIN staff s ON s.id=sa.staff_id AND s.user_id=sa.user_id
         JOIN users u ON u.id=sa.user_id
@@ -353,19 +444,21 @@ def staff_login():
             "lat":    acc["geofence_lat"],
             "lng":    acc["geofence_lng"],
             "radius": acc["geofence_radius"]
+        },
+        "schedule": {
+            "checkin_time":  acc["checkin_time"]  or "09:00",
+            "checkout_time": acc["checkout_time"] or "17:00"
         }
     })
 
 
-# ── Staff self-register (links to existing staff record by company code + staff ID)
 @app.route("/auth/staff-register", methods=["POST"])
 def staff_register():
-    data      = require_json()
-    email     = sanitize(data.get("email"),     MAX_EMAIL_LEN,    "email")
-    password  = sanitize(data.get("password"),  MAX_PASSWORD_LEN, "password")
-    staff_id  = validate_staff_id(data.get("staff_id"))
-    # company_email is the admin account email — used to look up the company
-    comp_email = sanitize(data.get("company_email"), MAX_EMAIL_LEN, "company_email")
+    data       = require_json()
+    email      = sanitize(data.get("email"),         MAX_EMAIL_LEN,    "email")
+    password   = sanitize(data.get("password"),      MAX_PASSWORD_LEN, "password")
+    staff_id   = validate_staff_id(data.get("staff_id"))
+    comp_email = sanitize(data.get("company_email"), MAX_EMAIL_LEN,    "company_email")
 
     if not email or not password or not comp_email:
         abort(400, description="email, password and company_email are required.")
@@ -375,16 +468,13 @@ def staff_register():
     conn = get_db()
     try:
         c = conn.cursor()
-        # Find the company
         c.execute("SELECT id, company FROM users WHERE email=%s", (comp_email,))
         company_row = c.fetchone()
         if not company_row:
             abort(404, description="Company account not found.")
         user_id = company_row["id"]
-        # Staff record must already exist
         if not staff_exists(conn, user_id, staff_id):
-            abort(404, description="Staff ID not found in this company. Ask your admin to add you first.")
-        # Check no duplicate sub-account
+            abort(404, description="Staff ID not found. Ask your admin to add you first.")
         c.execute("SELECT id FROM staff_accounts WHERE user_id=%s AND staff_id=%s", (user_id, staff_id))
         if c.fetchone():
             abort(409, description="A sub-account already exists for this staff ID.")
@@ -425,12 +515,169 @@ def get_profile():
     current = get_current_user()
     conn    = get_db()
     c       = conn.cursor()
-    c.execute("SELECT id, company, email, phone, created_at, geofence_lat, geofence_lng, geofence_radius FROM users WHERE id=%s", (current["sub"],))
+    c.execute("""SELECT id, company, email, phone, created_at,
+                        geofence_lat, geofence_lng, geofence_radius,
+                        checkin_time, checkout_time
+                 FROM users WHERE id=%s""", (current["sub"],))
     user = c.fetchone()
     conn.close()
     if not user:
         abort(404)
     return jsonify(dict(user))
+
+
+@app.route("/auth/update-profile", methods=["PUT"])
+def update_profile():
+    """Admin updates their own profile. PIN already verified on frontend before calling this."""
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data    = require_json()
+    email   = sanitize(data.get("email"),   MAX_EMAIL_LEN,    "email")
+    phone   = sanitize(data.get("phone"),   MAX_PHONE_LEN,    "phone")
+    company = sanitize(data.get("company"), MAX_COMPANY_LEN,  "company")
+
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        # Check email not taken by someone else
+        if email:
+            c.execute("SELECT id FROM users WHERE email=%s AND id!=%s", (email, current["sub"]))
+            if c.fetchone():
+                abort(409, description="This email is already in use by another account.")
+        c.execute(
+            "UPDATE users SET email=COALESCE(%s,email), phone=%s, company=COALESCE(%s,company) WHERE id=%s",
+            (email, phone, company, current["sub"])
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/auth/change-password", methods=["PUT"])
+def change_password():
+    """Admin changes their own password. PIN already verified on frontend."""
+    current     = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data        = require_json()
+    new_password = sanitize(data.get("new_password"), MAX_PASSWORD_LEN, "new_password")
+    if not new_password or len(new_password) < 8:
+        abort(400, description="Password must be at least 8 characters.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("UPDATE users SET password=%s WHERE id=%s", (hash_password(new_password), current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/auth/change-pin", methods=["PUT"])
+def change_pin():
+    """Admin changes their own PIN. Old PIN verified on frontend first."""
+    current  = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data     = require_json()
+    new_pin  = sanitize(data.get("new_pin"), 10, "new_pin")
+    if not new_pin or not PIN_RE.match(new_pin):
+        abort(400, description="PIN must be 4–8 digits.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("UPDATE users SET pin=%s WHERE id=%s", (hash_password(new_pin), current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ── Forgot password ──────────────────────────────────────────────────────────
+@app.route("/auth/forgot-password", methods=["POST"])
+def forgot_password():
+    data  = require_json()
+    email = sanitize(data.get("email"), MAX_EMAIL_LEN, "email")
+    role  = data.get("role", "admin")
+    if not email:
+        abort(400, description="'email' is required.")
+
+    # Check user exists (admin or staff account)
+    conn = get_db()
+    c    = conn.cursor()
+    if role == "staff":
+        c.execute("SELECT id FROM staff_accounts WHERE email=%s", (email,))
+    else:
+        c.execute("SELECT id FROM users WHERE email=%s", (email,))
+    user = c.fetchone()
+
+    if not user:
+        conn.close()
+        # Return ok anyway to not leak existence
+        return jsonify({"ok": True, "message": "If this email exists, a code has been sent."})
+
+    # Generate 6-digit code
+    code    = "".join(random.choices(string.digits, k=6))
+    expires = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+
+    # Delete any old unused codes for this email
+    c.execute("DELETE FROM password_resets WHERE email=%s AND role=%s", (email, role))
+    c.execute(
+        "INSERT INTO password_resets (email, role, code, expires_at) VALUES (%s,%s,%s,%s)",
+        (email, role, code, expires)
+    )
+    conn.commit()
+    conn.close()
+
+    # Send email
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0f204a;color:#eef4ff;border-radius:16px">
+      <h2 style="color:#3fc1c9;margin-bottom:8px">Password Reset</h2>
+      <p style="color:#bfc9e3">Your verification code is:</p>
+      <div style="font-size:42px;font-weight:800;letter-spacing:12px;text-align:center;
+                  padding:24px;background:rgba(255,255,255,0.08);border-radius:12px;margin:20px 0">
+        {code}
+      </div>
+      <p style="color:#bfc9e3;font-size:13px">This code expires in <strong>10 minutes</strong>.</p>
+      <p style="color:#bfc9e3;font-size:13px">If you didn't request this, ignore this email.</p>
+    </div>
+    """
+    sent = send_email(email, "Your Password Reset Code — S Advanced Attendance", html)
+    return jsonify({"ok": True, "message": "If this email exists, a code has been sent.", "email_sent": sent})
+
+
+@app.route("/auth/reset-password", methods=["POST"])
+def reset_password():
+    data         = require_json()
+    email        = sanitize(data.get("email"),        MAX_EMAIL_LEN,    "email")
+    code         = sanitize(data.get("code"),         10,               "code")
+    new_password = sanitize(data.get("new_password"), MAX_PASSWORD_LEN, "new_password")
+    role         = data.get("role", "admin")
+
+    if not email or not code or not new_password:
+        abort(400, description="email, code and new_password are required.")
+    if len(new_password) < 8:
+        abort(400, description="Password must be at least 8 characters.")
+
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        SELECT id FROM password_resets
+        WHERE email=%s AND role=%s AND code=%s AND used=FALSE AND expires_at > %s
+    """, (email, role, code, datetime.utcnow().isoformat()))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        abort(400, description="Invalid or expired code.")
+
+    hashed = hash_password(new_password)
+    if role == "staff":
+        c.execute("UPDATE staff_accounts SET password=%s WHERE email=%s", (hashed, email))
+    else:
+        c.execute("UPDATE users SET password=%s WHERE email=%s", (hashed, email))
+
+    c.execute("UPDATE password_resets SET used=TRUE WHERE id=%s", (row["id"],))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "message": "Password updated. You can now sign in."})
 
 
 # ── Geofence config ──────────────────────────────────────────────────────────
@@ -452,6 +699,30 @@ def set_geofence():
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "lat": lat, "lng": lng, "radius": radius})
+
+
+# ── Work schedule config ─────────────────────────────────────────────────────
+@app.route("/settings/schedule", methods=["PUT"])
+def set_schedule():
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data          = require_json()
+    checkin_time  = sanitize(data.get("checkin_time"),  5, "checkin_time")
+    checkout_time = sanitize(data.get("checkout_time"), 5, "checkout_time")
+    if not checkin_time or not checkout_time:
+        abort(400, description="checkin_time and checkout_time are required.")
+    # Validate HH:MM format
+    time_re = re.compile(r'^\d{2}:\d{2}$')
+    if not time_re.match(checkin_time) or not time_re.match(checkout_time):
+        abort(400, description="Times must be in HH:MM format.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("UPDATE users SET checkin_time=%s, checkout_time=%s WHERE id=%s",
+              (checkin_time, checkout_time, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "checkin_time": checkin_time, "checkout_time": checkout_time})
 
 
 # ===== Staff ================================================================
@@ -531,9 +802,9 @@ def remove_staff(staff_id):
         if not staff_exists(conn, current["sub"], staff_id):
             abort(404)
         c = conn.cursor()
-        c.execute("DELETE FROM attendance    WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
+        c.execute("DELETE FROM attendance     WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
         c.execute("DELETE FROM staff_accounts WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
-        c.execute("DELETE FROM staff         WHERE id=%s AND user_id=%s",        (staff_id, current["sub"]))
+        c.execute("DELETE FROM staff          WHERE id=%s AND user_id=%s",       (staff_id, current["sub"]))
         conn.commit()
     finally:
         conn.close()
@@ -543,8 +814,7 @@ def remove_staff(staff_id):
 # ===== Attendance ===========================================================
 @app.route("/attendance", methods=["GET"])
 def list_attendance():
-    current  = get_current_user()
-    # Staff role: only their own records
+    current = get_current_user()
     if current.get("role") == "staff":
         staff_id = current.get("staff_id")
         conn     = get_db()
@@ -574,35 +844,39 @@ def record_attendance():
     current  = get_current_user()
     data     = require_json()
 
-    # Staff role can only record for themselves
     if current.get("role") == "staff":
         staff_id = current.get("staff_id")
     else:
         staff_id = validate_staff_id(data.get("staff_id"))
 
-    action   = sanitize(data.get("action"), 20, "action")
-    lat      = data.get("lat")
-    lng      = data.get("lng")
+    action = sanitize(data.get("action"), 20, "action")
+    lat    = data.get("lat")
+    lng    = data.get("lng")
 
     if action not in VALID_ACTIONS:
         abort(400, description=f"'action' must be one of: {', '.join(VALID_ACTIONS)}.")
 
-    # Geofence check if coordinates and fence are set
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute("SELECT geofence_lat, geofence_lng, geofence_radius FROM users WHERE id=%s", (current["sub"],))
+        # Load geofence + schedule
+        c.execute("""SELECT geofence_lat, geofence_lng, geofence_radius,
+                            checkin_time, checkout_time
+                     FROM users WHERE id=%s""", (current["sub"],))
         settings = c.fetchone()
+
+        # Geofence check — applies to ALL roles
         if settings and settings["geofence_lat"] and lat is not None and lng is not None:
             dist = haversine_m(
                 settings["geofence_lat"], settings["geofence_lng"],
                 float(lat), float(lng)
             )
             if dist > settings["geofence_radius"]:
-                abort(403, description=f"You are {int(dist)}m from the office — outside the allowed {settings['geofence_radius']}m radius.")
+                abort(403, description=f"Unable to {action.replace('_',' ')} due to location mismatch. You are {int(dist)}m away (allowed: {settings['geofence_radius']}m).")
 
         if not staff_exists(conn, current["sub"], staff_id):
             abort(404, description=f"Staff '{staff_id}' not found.")
+
         timestamp = datetime.utcnow().isoformat()
         c.execute(
             "INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng) VALUES (%s,%s,%s,%s,%s,%s)",
@@ -616,24 +890,17 @@ def record_attendance():
     return jsonify({"message": f"{staff_id} {action}", "timestamp": timestamp}), 201
 
 
-# ===== Attendance summary (weekly/daily) ====================================
+# ===== Attendance summary ===================================================
 @app.route("/attendance/summary", methods=["GET"])
 def attendance_summary():
-    """
-    Returns per-staff weekly hours (for admin dashboard & staff portal).
-    ?period=weekly  — last 7 days (default)
-    ?period=daily   — today only
-    ?staff_id=X     — filter to one staff member
-    """
-    current  = get_current_user()
-    period   = request.args.get("period", "weekly")
+    current   = get_current_user()
+    period    = request.args.get("period", "weekly")
     filter_id = request.args.get("staff_id")
 
-    # Staff can only see themselves
     if current.get("role") == "staff":
         filter_id = current.get("staff_id")
 
-    now   = datetime.utcnow()
+    now = datetime.utcnow()
     if period == "daily":
         since = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     else:
@@ -641,6 +908,17 @@ def attendance_summary():
 
     conn = get_db()
     c    = conn.cursor()
+
+    # Get schedule for grading
+    c.execute("SELECT checkin_time, checkout_time FROM users WHERE id=%s", (current["sub"],))
+    sched = c.fetchone()
+    checkin_time  = (sched["checkin_time"]  if sched else None) or "09:00"
+    checkout_time = (sched["checkout_time"] if sched else None) or "17:00"
+
+    # Get all staff for absent detection
+    c.execute("SELECT id, name FROM staff WHERE user_id=%s", (current["sub"],))
+    all_staff = {r["id"]: r["name"] for r in c.fetchall()}
+
     query = """
         SELECT a.staff_id, s.name, a.action, a.timestamp
         FROM attendance a
@@ -656,9 +934,8 @@ def attendance_summary():
     rows = c.fetchall()
     conn.close()
 
-    # Compute hours per staff by pairing check_in → check_out
     from collections import defaultdict
-    staff_map = {}
+    staff_map       = {}
     events_by_staff = defaultdict(list)
     for r in rows:
         staff_map[r["staff_id"]] = r["name"] or r["staff_id"]
@@ -670,50 +947,80 @@ def attendance_summary():
         days_present  = set()
         check_in_time = None
         sessions      = []
+        lateness_grades = []
+
         for ev in events:
             ts = datetime.fromisoformat(ev["timestamp"])
             if ev["action"] == "check_in":
                 check_in_time = ts
                 days_present.add(ts.date().isoformat())
+                grade_label, mins_late = compute_lateness_grade(ts, checkin_time)
+                lateness_grades.append({"date": ts.date().isoformat(), "grade": grade_label, "minutes_late": mins_late})
             elif ev["action"] == "check_out" and check_in_time:
                 dur = (ts - check_in_time).total_seconds()
                 total_seconds += dur
                 sessions.append({
-                    "in":  check_in_time.isoformat(),
-                    "out": ts.isoformat(),
+                    "in":    check_in_time.isoformat(),
+                    "out":   ts.isoformat(),
                     "hours": round(dur / 3600, 2)
                 })
                 check_in_time = None
 
         total_hours = round(total_seconds / 3600, 2)
-        # Grade: based on expected 8h/day × days in period
-        days_in_period = 1 if period == "daily" else 5  # Mon–Fri
-        expected_hours = days_in_period * 8
-        pct = (total_hours / expected_hours * 100) if expected_hours else 0
-        if   pct >= 90: grade = "A"
-        elif pct >= 75: grade = "B"
-        elif pct >= 60: grade = "C"
-        elif pct >= 40: grade = "D"
-        else:           grade = "F"
+
+        # Overall grade from lateness
+        grade_order = {"Excellent": 5, "Good": 4, "Fair": 3, "Late": 2, "Very Late": 1, "Absent": 0}
+        if lateness_grades:
+            avg_score = sum(grade_order.get(g["grade"], 0) for g in lateness_grades) / len(lateness_grades)
+            if avg_score >= 4.5:  overall = "Excellent"
+            elif avg_score >= 3.5: overall = "Good"
+            elif avg_score >= 2.5: overall = "Fair"
+            elif avg_score >= 1.5: overall = "Late"
+            else:                  overall = "Very Late"
+        else:
+            overall = "Absent"
 
         summaries.append({
-            "staff_id":     sid,
-            "name":         staff_map[sid],
-            "total_hours":  total_hours,
-            "days_present": len(days_present),
-            "grade":        grade,
-            "pct":          round(pct, 1),
-            "sessions":     sessions
+            "staff_id":       sid,
+            "name":           staff_map.get(sid, sid),
+            "total_hours":    total_hours,
+            "days_present":   len(days_present),
+            "grade":          overall,
+            "lateness_log":   lateness_grades,
+            "sessions":       sessions,
+            "checkin_time":   checkin_time,
+            "checkout_time":  checkout_time
         })
 
-    summaries.sort(key=lambda x: x["total_hours"], reverse=True)
-    return jsonify({"period": period, "since": since, "summaries": summaries})
+    # Add absent staff (only for daily period)
+    if period == "daily":
+        today_str = now.date().isoformat()
+        present_ids = set(events_by_staff.keys())
+        if filter_id:
+            check_ids = {filter_id} if filter_id in all_staff else set()
+        else:
+            check_ids = set(all_staff.keys())
+        for sid in check_ids - present_ids:
+            summaries.append({
+                "staff_id":      sid,
+                "name":          all_staff.get(sid, sid),
+                "total_hours":   0,
+                "days_present":  0,
+                "grade":         "Absent",
+                "lateness_log":  [],
+                "sessions":      [],
+                "checkin_time":  checkin_time,
+                "checkout_time": checkout_time
+            })
+
+    summaries.sort(key=lambda x: (x["grade"] != "Absent", x["total_hours"]), reverse=True)
+    return jsonify({"period": period, "since": since, "summaries": summaries,
+                    "checkin_time": checkin_time, "checkout_time": checkout_time})
 
 
 # ===== AI Analytics =========================================================
 @app.route("/analytics", methods=["GET"])
 def analytics():
-    """Basic AI-style analytics — trends, anomalies, top/bottom performers."""
     current = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
@@ -721,41 +1028,46 @@ def analytics():
     conn = get_db()
     c    = conn.cursor()
 
-    now    = datetime.utcnow()
-    today  = now.date().isoformat()
-    week_ago = (now - timedelta(days=7)).isoformat()
+    # Get schedule
+    c.execute("SELECT checkin_time, checkout_time FROM users WHERE id=%s", (current["sub"],))
+    sched = c.fetchone()
+    checkin_time = (sched["checkin_time"] if sched else None) or "09:00"
+
+    now       = datetime.utcnow()
+    today     = now.date().isoformat()
+    week_ago  = (now - timedelta(days=7)).isoformat()
     month_ago = (now - timedelta(days=30)).isoformat()
 
-    # Today check-ins
     c.execute("SELECT COUNT(*) AS n FROM attendance WHERE user_id=%s AND action='check_in' AND timestamp LIKE %s",
               (current["sub"], today + "%"))
     today_checkins = c.fetchone()["n"]
 
-    # This week
     c.execute("SELECT COUNT(*) AS n FROM attendance WHERE user_id=%s AND action='check_in' AND timestamp>=%s",
               (current["sub"], week_ago))
     week_checkins = c.fetchone()["n"]
 
-    # Avg check-in time (last 30d)
     c.execute("""
         SELECT staff_id, timestamp FROM attendance
-        WHERE user_id=%s AND action='check_in' AND timestamp>=%s
-        ORDER BY timestamp
+        WHERE user_id=%s AND action='check_in' AND timestamp>=%s ORDER BY timestamp
     """, (current["sub"], month_ago))
     ci_rows = c.fetchall()
 
-    # Staff attendance frequency (last 30d)
+    # Lateness stats for last 30d
+    lateness_counts = {"Excellent": 0, "Good": 0, "Fair": 0, "Late": 0, "Very Late": 0}
+    for r in ci_rows:
+        ts = datetime.fromisoformat(r["timestamp"])
+        grade_label, _ = compute_lateness_grade(ts, checkin_time)
+        lateness_counts[grade_label] = lateness_counts.get(grade_label, 0) + 1
+
     c.execute("""
         SELECT a.staff_id, s.name, COUNT(*) AS sessions
         FROM attendance a
         LEFT JOIN staff s ON s.id=a.staff_id AND s.user_id=a.user_id
         WHERE a.user_id=%s AND a.action='check_in' AND a.timestamp>=%s
-        GROUP BY a.staff_id, s.name
-        ORDER BY sessions DESC
+        GROUP BY a.staff_id, s.name ORDER BY sessions DESC
     """, (current["sub"], month_ago))
     freq_rows = [dict(r) for r in c.fetchall()]
 
-    # Anomaly: staff who checked in but never out today
     c.execute("""
         SELECT DISTINCT a.staff_id, s.name
         FROM attendance a
@@ -769,7 +1081,6 @@ def analytics():
     """, (current["sub"], today + "%", today + "%"))
     still_in = [dict(r) for r in c.fetchall()]
 
-    # Daily trend for last 14 days
     trend = []
     for i in range(13, -1, -1):
         d = (now - timedelta(days=i)).date().isoformat()
@@ -779,7 +1090,6 @@ def analytics():
 
     conn.close()
 
-    # Avg check-in hour
     if ci_rows:
         hours = [datetime.fromisoformat(r["timestamp"]).hour + datetime.fromisoformat(r["timestamp"]).minute/60
                  for r in ci_rows]
@@ -795,11 +1105,13 @@ def analytics():
         "still_clocked_in":     still_in,
         "daily_trend":          trend,
         "top_performers":       freq_rows[:3],
-        "low_attendance":       [r for r in freq_rows if r["sessions"] < 3]
+        "low_attendance":       [r for r in freq_rows if r["sessions"] < 3],
+        "lateness_breakdown":   lateness_counts,
+        "checkin_time":         checkin_time
     })
 
 
-# ===== External Integration (Google Sheets / Webhook) =======================
+# ===== External Integration =================================================
 @app.route("/integrations", methods=["GET"])
 def get_integration():
     current = get_current_user()
@@ -813,7 +1125,6 @@ def get_integration():
     if not row:
         return jsonify(None)
     cfg = json.loads(row["config"])
-    # Redact sensitive keys
     safe_cfg = {k: ("***" if "key" in k.lower() or "secret" in k.lower() or "token" in k.lower() else v)
                 for k, v in cfg.items()}
     return jsonify({"type": row["type"], "config": safe_cfg, "created_at": row["created_at"]})
@@ -821,16 +1132,16 @@ def get_integration():
 
 @app.route("/integrations", methods=["POST"])
 def save_integration():
-    current = get_current_user()
+    current    = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
-    data        = require_json()
-    itype       = sanitize(data.get("type"),   20, "type")
-    config_raw  = data.get("config", {})
+    data       = require_json()
+    itype      = sanitize(data.get("type"),   20, "type")
+    config_raw = data.get("config", {})
     if not isinstance(config_raw, dict):
         abort(400, description="'config' must be a JSON object.")
-    config_str  = json.dumps(config_raw)
-    created     = datetime.utcnow().isoformat()
+    config_str = json.dumps(config_raw)
+    created    = datetime.utcnow().isoformat()
     conn = get_db()
     c    = conn.cursor()
     c.execute("""
@@ -858,12 +1169,10 @@ def delete_integration():
 
 @app.route("/integrations/push", methods=["POST"])
 def push_to_integration():
-    """Push a single attendance record to external integration (webhook/Google Sheets)."""
     current = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
     import urllib.request, urllib.error
-
     conn = get_db()
     c    = conn.cursor()
     c.execute("SELECT type, config FROM external_integrations WHERE user_id=%s", (current["sub"],))
@@ -871,9 +1180,8 @@ def push_to_integration():
     if not row:
         conn.close()
         abort(404, description="No integration configured.")
-
     data_to_push = require_json()
-    cfg  = json.loads(row["config"])
+    cfg   = json.loads(row["config"])
     itype = row["type"]
     conn.close()
 
@@ -890,7 +1198,6 @@ def push_to_integration():
             return jsonify({"error": f"Webhook delivery failed: {e.reason}"}), 502
         return jsonify({"ok": True, "type": "webhook"})
 
-    # Google Sheets via Apps Script web app URL
     if itype == "google_sheets":
         url = cfg.get("apps_script_url")
         if not url:
@@ -907,16 +1214,14 @@ def push_to_integration():
     abort(400, description=f"Unknown integration type: {itype}")
 
 
-# ===== Reports (export data) ================================================
+# ===== Reports ==============================================================
 @app.route("/reports/attendance", methods=["GET"])
 def report_attendance():
-    """Full attendance export for a date range. ?from=YYYY-MM-DD&to=YYYY-MM-DD"""
-    current = get_current_user()
+    current   = get_current_user()
     date_from = request.args.get("from", (datetime.utcnow() - timedelta(days=30)).date().isoformat())
     date_to   = request.args.get("to",   datetime.utcnow().date().isoformat())
     conn = get_db()
     c    = conn.cursor()
-
     staff_filter = request.args.get("staff_id")
     query = """
         SELECT a.id, a.staff_id, s.name, a.action, a.timestamp, a.lat, a.lng
@@ -941,9 +1246,9 @@ def superadmin_stats():
     require_superadmin()
     conn = get_db()
     c    = conn.cursor()
-    c.execute("SELECT COUNT(*) AS n FROM users");        total_users      = c.fetchone()["n"]
-    c.execute("SELECT COUNT(*) AS n FROM staff");        total_staff      = c.fetchone()["n"]
-    c.execute("SELECT COUNT(*) AS n FROM attendance");   total_attendance = c.fetchone()["n"]
+    c.execute("SELECT COUNT(*) AS n FROM users");       total_users      = c.fetchone()["n"]
+    c.execute("SELECT COUNT(*) AS n FROM staff");       total_staff      = c.fetchone()["n"]
+    c.execute("SELECT COUNT(*) AS n FROM attendance");  total_attendance = c.fetchone()["n"]
     today = datetime.utcnow().date().isoformat()
     c.execute("SELECT COUNT(*) AS n FROM attendance WHERE action='check_in' AND timestamp LIKE %s", (today + "%",))
     today_checkins = c.fetchone()["n"]
@@ -964,11 +1269,11 @@ def superadmin_users():
     c    = conn.cursor()
     c.execute("""
         SELECT u.id, u.company, u.email, u.phone, u.created_at,
-               COUNT(DISTINCT s.id)  AS staff_count,
-               COUNT(DISTINCT a.id)  AS attendance_count
+               COUNT(DISTINCT s.id) AS staff_count,
+               COUNT(DISTINCT a.id) AS attendance_count
         FROM users u
-        LEFT JOIN staff      s ON s.user_id = u.id
-        LEFT JOIN attendance a ON a.user_id = u.id
+        LEFT JOIN staff s ON s.user_id=u.id
+        LEFT JOIN attendance a ON a.user_id=u.id
         GROUP BY u.id ORDER BY u.created_at DESC
     """)
     users = c.fetchall()
@@ -984,17 +1289,393 @@ def superadmin_delete_user(user_id):
         c.execute("SELECT id FROM users WHERE id=%s", (user_id,))
         if not c.fetchone():
             abort(404)
-        c.execute("DELETE FROM attendance           WHERE user_id=%s", (user_id,))
-        c.execute("DELETE FROM staff_accounts       WHERE user_id=%s", (user_id,))
-        c.execute("DELETE FROM staff                WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM attendance            WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM staff_accounts        WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM staff                 WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM external_integrations WHERE user_id=%s", (user_id,))
-        c.execute("DELETE FROM users                WHERE id=%s",      (user_id,))
+        c.execute("DELETE FROM users                 WHERE id=%s",      (user_id,))
         conn.commit()
     finally:
         conn.close()
     return jsonify({"message": f"User {user_id} deleted."})
 
 
+# ===== Health ===============================================================
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
+
+@app.route("/ping", methods=["GET"])
+def ping():
+    return jsonify({"pong": True})
+
+
+# ===== Notice Board =========================================================
+@app.route("/notices", methods=["GET"])
+def get_notices():
+    current = get_current_user()
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        SELECT id, title, body, created_at, pinned
+        FROM notices WHERE user_id=%s ORDER BY pinned DESC, created_at DESC LIMIT 20
+    """, (current["sub"],))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/notices", methods=["POST"])
+def post_notice():
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data  = require_json()
+    title = sanitize(data.get("title"), 120, "title")
+    body  = sanitize(data.get("body"),  500, "body")
+    pinned = bool(data.get("pinned", False))
+    if not title or not body:
+        abort(400, description="title and body are required.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        INSERT INTO notices (user_id, title, body, created_at, pinned)
+        VALUES (%s,%s,%s,%s,%s) RETURNING id
+    """, (current["sub"], title, body, datetime.utcnow().isoformat(), pinned))
+    nid = c.fetchone()["id"]
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "id": nid}), 201
+
+@app.route("/notices/<int:nid>", methods=["DELETE"])
+def delete_notice(nid):
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("DELETE FROM notices WHERE id=%s AND user_id=%s", (nid, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== Feedback =============================================================
+@app.route("/feedback", methods=["POST"])
+def submit_feedback():
+    current = get_current_user()
+    data    = require_json()
+    message = sanitize(data.get("message"), 1000, "message")
+    rating  = data.get("rating")  # 1-5 optional
+    if not message:
+        abort(400, description="message is required.")
+
+    role     = current.get("role", "admin")
+    sender   = current.get("company") or current.get("staff_id") or "Unknown"
+    stars    = "⭐" * int(rating) if rating and str(rating).isdigit() else ""
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;
+                background:#0f204a;color:#eef4ff;border-radius:16px">
+      <h2 style="color:#3fc1c9;margin-bottom:4px">📬 New Feedback</h2>
+      <p style="color:#bfc9e3;font-size:13px;margin-bottom:20px">
+        S Advanced Attendance System
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <tr><td style="color:#bfc9e3;padding:6px 0;width:120px">From</td>
+            <td style="color:#fff;font-weight:700">{sender} ({role})</td></tr>
+        {'<tr><td style="color:#bfc9e3;padding:6px 0">Rating</td><td>' + stars + '</td></tr>' if stars else ''}
+        <tr><td style="color:#bfc9e3;padding:6px 0;vertical-align:top">Message</td>
+            <td style="color:#fff">{message}</td></tr>
+        <tr><td style="color:#bfc9e3;padding:6px 0">Time</td>
+            <td style="color:#fff">{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</td></tr>
+      </table>
+    </div>
+    """
+    sent = send_email("ongodsolomon17@gmail.com",
+                      f"Feedback from {sender} — S Advanced Attendance", html)
+    return jsonify({"ok": True, "sent": sent})
+
+
+# ===== Profile Picture ======================================================
+import base64 as _base64
+
+ALLOWED_IMG_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_IMG_BYTES     = 2 * 1024 * 1024  # 2 MB
+
+@app.route("/settings/profile-picture", methods=["POST"])
+def upload_profile_picture():
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data      = require_json()
+    mime_type = data.get("mime_type", "")
+    img_b64   = data.get("image_b64", "")
+
+    if mime_type not in ALLOWED_IMG_TYPES:
+        abort(400, description="Only JPEG, PNG, WebP or GIF images are allowed.")
+    try:
+        img_bytes = _base64.b64decode(img_b64)
+    except Exception:
+        abort(400, description="Invalid image data.")
+    if len(img_bytes) > MAX_IMG_BYTES:
+        abort(400, description="Image must be under 2 MB.")
+
+    # Basic magic-byte validation
+    magic = img_bytes[:4]
+    valid = (
+        magic[:3] == b'\xff\xd8\xff' or   # JPEG
+        magic[:4] == b'\x89PNG'       or   # PNG
+        magic[:4] == b'RIFF'          or   # WebP (RIFF....WEBP)
+        magic[:4] == b'GIF8'               # GIF
+    )
+    if not valid:
+        abort(400, description="File does not appear to be a valid image.")
+
+    # Store as data URL in DB
+    data_url = f"data:{mime_type};base64,{img_b64}"
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("UPDATE users SET profile_picture=%s WHERE id=%s", (data_url, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "url": data_url})
+
+@app.route("/settings/profile-picture", methods=["DELETE"])
+def delete_profile_picture():
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("UPDATE users SET profile_picture=NULL WHERE id=%s", (current["sub"],))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+@app.route("/company/branding", methods=["GET"])
+def get_company_branding():
+    """Public-ish endpoint — staff can fetch their company's branding by user_id."""
+    current = get_current_user()
+    conn    = get_db()
+    c       = conn.cursor()
+    c.execute("SELECT company, profile_picture FROM users WHERE id=%s", (current["sub"],))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        abort(404)
+    return jsonify(dict(row))
+
+
+# ===== Device Binding =======================================================
+@app.route("/devices", methods=["GET"])
+def list_devices():
+    """Admin sees their own trusted devices."""
+    current = get_current_user()
+    conn    = get_db()
+    c       = conn.cursor()
+    c.execute("""
+        SELECT id, device_name, device_fingerprint, created_at, last_used, expires_at, status
+        FROM trusted_devices WHERE user_id=%s AND role='admin' ORDER BY last_used DESC
+    """, (current["sub"],))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/devices/pending", methods=["GET"])
+def list_pending_devices():
+    """Admin sees all pending device requests from their staff."""
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        SELECT td.id, td.device_name, td.device_fingerprint, td.created_at,
+               td.staff_id, sa.email as staff_email, s.name as staff_name, td.status
+        FROM trusted_devices td
+        LEFT JOIN staff_accounts sa ON sa.user_id=td.user_id AND sa.staff_id=td.staff_id
+        LEFT JOIN staff s ON s.id=td.staff_id AND s.user_id=td.user_id
+        WHERE td.user_id=%s AND td.role='staff' AND td.status='pending'
+        ORDER BY td.created_at DESC
+    """, (current["sub"],))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/devices/verify", methods=["POST"])
+def verify_device():
+    """
+    Called right after login.
+    For admins  : checks trusted_devices for their own fingerprint (no expiry restriction).
+    For staff   : checks if this fingerprint is the primary bound device OR
+                  an admin-approved temp device still within 20h window.
+    Returns {status: 'trusted'|'pending'|'rejected'|'unknown', device_id: int|None}
+    """
+    current     = get_current_user()
+    data        = require_json()
+    fingerprint = sanitize(data.get("fingerprint"), 200, "fingerprint")
+    device_name = sanitize(data.get("device_name"), 100, "device_name") or "Unknown Device"
+    role        = current.get("role", "admin")
+
+    if not fingerprint:
+        return jsonify({"status": "unknown"})
+
+    conn = get_db()
+    c    = conn.cursor()
+    now  = datetime.utcnow().isoformat()
+
+    if role == "admin":
+        # Admins: simple trusted check, no expiry
+        c.execute("""
+            SELECT id, status FROM trusted_devices
+            WHERE user_id=%s AND role='admin' AND device_fingerprint=%s
+        """, (current["sub"], fingerprint))
+        row = c.fetchone()
+        if row and row["status"] == "trusted":
+            c.execute("UPDATE trusted_devices SET last_used=%s WHERE id=%s", (now, row["id"]))
+            conn.commit()
+            conn.close()
+            return jsonify({"status": "trusted", "device_id": row["id"]})
+        conn.close()
+        return jsonify({"status": "unknown"})
+
+    # Staff: find primary bound device (first trusted one) or approved temp
+    staff_id = current.get("staff_id")
+    c.execute("""
+        SELECT id, status, expires_at, device_fingerprint FROM trusted_devices
+        WHERE user_id=%s AND role='staff' AND staff_id=%s
+        ORDER BY created_at ASC
+    """, (current["sub"], staff_id))
+    devices = c.fetchall()
+
+    if not devices:
+        # First device ever — auto-bind as primary trusted
+        c.execute("""
+            INSERT INTO trusted_devices
+            (user_id, role, staff_id, device_fingerprint, device_name, created_at, last_used, expires_at, status)
+            VALUES (%s,'staff',%s,%s,%s,%s,%s,NULL,'trusted')
+        """, (current["sub"], staff_id, fingerprint, device_name,
+              datetime.utcnow().isoformat(), now))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "trusted", "first_bind": True})
+
+    # Check if this fingerprint matches any existing device
+    for dev in devices:
+        if dev["device_fingerprint"] == fingerprint:
+            if dev["status"] == "trusted":
+                c.execute("UPDATE trusted_devices SET last_used=%s WHERE id=%s", (now, dev["id"]))
+                conn.commit()
+                conn.close()
+                return jsonify({"status": "trusted", "device_id": dev["id"]})
+            elif dev["status"] == "approved_temp":
+                if dev["expires_at"] and dev["expires_at"] > now:
+                    c.execute("UPDATE trusted_devices SET last_used=%s WHERE id=%s", (now, dev["id"]))
+                    conn.commit()
+                    conn.close()
+                    return jsonify({"status": "trusted", "device_id": dev["id"], "temp": True,
+                                    "expires_at": dev["expires_at"]})
+                else:
+                    # Temp approval expired
+                    c.execute("UPDATE trusted_devices SET status='expired' WHERE id=%s", (dev["id"],))
+                    conn.commit()
+                    conn.close()
+                    return jsonify({"status": "rejected", "reason": "Temporary access expired."})
+            elif dev["status"] == "pending":
+                conn.close()
+                return jsonify({"status": "pending"})
+            elif dev["status"] in ("rejected", "expired"):
+                conn.close()
+                return jsonify({"status": "rejected"})
+
+    # New unknown device for this staff — create a pending request
+    c.execute("""
+        INSERT INTO trusted_devices
+        (user_id, role, staff_id, device_fingerprint, device_name, created_at, last_used, expires_at, status)
+        VALUES (%s,'staff',%s,%s,%s,%s,%s,NULL,'pending')
+        ON CONFLICT DO NOTHING
+    """, (current["sub"], staff_id, fingerprint, device_name,
+          datetime.utcnow().isoformat(), now))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "pending"})
+
+
+@app.route("/devices/trust", methods=["POST"])
+def trust_device():
+    """Admin registers their own device as trusted (no expiry)."""
+    current     = get_current_user()
+    data        = require_json()
+    fingerprint = sanitize(data.get("fingerprint"), 200, "fingerprint")
+    device_name = sanitize(data.get("device_name"), 100, "device_name") or "Unknown Device"
+    if not fingerprint:
+        abort(400, description="fingerprint is required.")
+    now = datetime.utcnow().isoformat()
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        INSERT INTO trusted_devices
+        (user_id, role, device_fingerprint, device_name, created_at, last_used, expires_at, status)
+        VALUES (%s,'admin',%s,%s,%s,%s,NULL,'trusted')
+        ON CONFLICT (user_id, role, device_fingerprint)
+        DO UPDATE SET last_used=%s, device_name=%s, status='trusted'
+    """, (current["sub"], fingerprint, device_name, now, now, now, device_name))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/devices/<int:device_id>/approve", methods=["POST"])
+def approve_device(device_id):
+    """Admin approves a pending staff device for 20 hours."""
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    expires = (datetime.utcnow() + timedelta(hours=20)).isoformat()
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        UPDATE trusted_devices SET status='approved_temp', expires_at=%s
+        WHERE id=%s AND user_id=%s AND role='staff'
+    """, (expires, device_id, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "expires_at": expires})
+
+
+@app.route("/devices/<int:device_id>/reject", methods=["POST"])
+def reject_device(device_id):
+    """Admin rejects a pending staff device request."""
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("""
+        UPDATE trusted_devices SET status='rejected'
+        WHERE id=%s AND user_id=%s AND role='staff'
+    """, (device_id, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/devices/<int:device_id>", methods=["DELETE"])
+def revoke_device(device_id):
+    """Admin revokes any device (their own or staff)."""
+    current = get_current_user()
+    conn    = get_db()
+    c       = conn.cursor()
+    c.execute("DELETE FROM trusted_devices WHERE id=%s AND user_id=%s",
+              (device_id, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ===== Health ===============================================================
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
