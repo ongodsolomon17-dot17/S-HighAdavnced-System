@@ -167,7 +167,6 @@
     </div>
     <div class="header-actions">
       <button class="pill" onclick="switchMainStaffTab('portal')">🏠 Portal</button>
-      <button class="pill" onclick="switchMainStaffTab('feedback')">💬 Feedback</button>
       <button class="pill danger-pill" onclick="handleLogout()">Sign Out</button>
     </div>
   </header>
@@ -233,33 +232,7 @@
       </section>
     </div>
 
-    <!-- Feedback Tab -->
-    <div id="staff-tab-feedback" class="hidden">
-      <article class="card wide-card" style="max-width:600px;margin:0 auto">
-        <h2>💬 Send Feedback</h2>
-        <p class="hint">Share your thoughts, suggestions, or concerns with the system administrator.</p>
-        <div class="form-grid" style="margin-top:16px">
-          <label>Rating (optional)</label>
-          <div id="star-rating" style="display:flex;gap:8px;font-size:28px;cursor:pointer">
-            <span onclick="setRating(1)">⭐</span><span onclick="setRating(2)">⭐</span>
-            <span onclick="setRating(3)">⭐</span><span onclick="setRating(4)">⭐</span>
-            <span onclick="setRating(5)">⭐</span>
-          </div>
-          <label>Message <span class="req">*</span></label>
-          <textarea id="feedback-message" rows="5" maxlength="1000"
-            style="resize:vertical;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);
-                   background:rgba(255,255,255,0.07);color:var(--text);font-family:inherit;font-size:14px"
-            placeholder="Write your feedback here…"></textarea>
-        </div>
-        <div class="button-row" style="margin-top:16px">
-          <button class="primary" onclick="submitFeedback()">
-            <span id="feedback-btn-label">Send Feedback</span>
-            <div class="btn-spinner hidden" id="feedback-spinner"></div>
-          </button>
-        </div>
-        <p id="feedback-status" class="hint" style="margin-top:10px;text-align:center"></p>
-      </article>
-    </div>
+
 
   </main>
   <footer class="app-footer"><p>S Advanced Attendance — Staff Portal</p></footer>
@@ -290,6 +263,7 @@
     <button class="nav-tab"        data-tab="analytics"   onclick="switchMainTab('analytics')">🤖 Analytics</button>
     <button class="nav-tab"        data-tab="notices"     onclick="switchMainTab('notices')">📢 Notices</button>
     <button class="nav-tab"        data-tab="settings"    onclick="switchMainTab('settings')">⚙️ Settings</button>
+    <button class="nav-tab"        data-tab="feedback"    onclick="switchMainTab('feedback')">💬 Feedback</button>
   </nav>
 
   <main>
@@ -489,6 +463,34 @@
           <div id="notices-list"><p class="hint">No notices yet.</p></div>
         </article>
       </div>
+    </section>
+
+    <!-- FEEDBACK -->
+    <section id="tab-feedback" class="tab-panel hidden">
+      <article class="card wide-card" style="max-width:600px;margin:0 auto">
+        <h2>💬 Send Feedback</h2>
+        <p class="hint">Share your thoughts or suggestions with the system developer.</p>
+        <div class="form-grid" style="margin-top:16px">
+          <label>Rating (optional)</label>
+          <div id="star-rating" style="display:flex;gap:8px;font-size:28px;cursor:pointer">
+            <span onclick="setRating(1)">⭐</span><span onclick="setRating(2)">⭐</span>
+            <span onclick="setRating(3)">⭐</span><span onclick="setRating(4)">⭐</span>
+            <span onclick="setRating(5)">⭐</span>
+          </div>
+          <label>Message <span class="req">*</span></label>
+          <textarea id="feedback-message" rows="5" maxlength="1000"
+            style="resize:vertical;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);
+                   background:rgba(255,255,255,0.07);color:var(--text);font-family:inherit;font-size:14px"
+            placeholder="Write your feedback here…"></textarea>
+        </div>
+        <div class="button-row" style="margin-top:16px">
+          <button class="primary" onclick="submitFeedback()">
+            <span id="feedback-btn-label">Send Feedback</span>
+            <div class="btn-spinner hidden" id="feedback-spinner"></div>
+          </button>
+        </div>
+        <p id="feedback-status" class="hint" style="margin-top:10px;text-align:center"></p>
+      </article>
     </section>
 
     <!-- SETTINGS -->
