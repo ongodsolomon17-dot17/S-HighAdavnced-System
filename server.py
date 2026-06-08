@@ -25,7 +25,7 @@ ALLOWED_ORIGINS = os.environ.get(
 CORS(app,
      origins=ALLOWED_ORIGINS,
      methods=["GET", "POST", "PUT", "DELETE"],
-     allow_headers=["Content-Type", "Authorization"])
+     allow_headers=["Content-Type", "Authorization", "X-Admin-Secret"])
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 DATABASE_URL      = os.environ.get("DATABASE_URL")
@@ -119,27 +119,22 @@ def haversine_m(lat1, lng1, lat2, lng2):
 # ===== Email (Resend) =======================================================
 def send_email(to: str, subject: str, html: str) -> bool:
     if not RESEND_API_KEY:
+        print("[EMAIL] ERROR: RESEND_API_KEY is not set.", flush=True)
         return False
-    import urllib.request, urllib.error
-    payload = json.dumps({
-        "from":    FROM_EMAIL,
-        "to":      [to],
-        "subject": subject,
-        "html":    html
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type":  "application/json"
-        },
-        method="POST"
-    )
     try:
-        urllib.request.urlopen(req, timeout=8)
+        import resend
+        resend.api_key = RESEND_API_KEY
+        params = {
+            "from":    FROM_EMAIL,
+            "to":      [to],
+            "subject": subject,
+            "html":    html
+        }
+        result = resend.Emails.send(params)
+        print(f"[EMAIL] Sent to {to} — result: {result}", flush=True)
         return True
-    except urllib.error.URLError:
+    except Exception as e:
+        print(f"[EMAIL] ERROR sending to {to}: {e}", flush=True)
         return False
 
 
