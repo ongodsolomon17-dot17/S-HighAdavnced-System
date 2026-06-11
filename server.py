@@ -156,9 +156,10 @@ def init_db():
             password        TEXT    NOT NULL,
             pin             TEXT    NOT NULL,
             created_at      TEXT    NOT NULL,
-            geofence_lat    DOUBLE PRECISION,
-            geofence_lng    DOUBLE PRECISION,
-            geofence_radius INTEGER DEFAULT 200,
+            geofence_lat     DOUBLE PRECISION,
+            geofence_lng     DOUBLE PRECISION,
+            geofence_radius  INTEGER DEFAULT 200,
+            geofence_enabled BOOLEAN DEFAULT FALSE,
             checkin_time    TEXT DEFAULT '09:00',
             checkout_time   TEXT DEFAULT '17:00'
         )
@@ -257,6 +258,7 @@ def init_db():
     # Migrations for existing tables
     migrations = [
         ("users", "geofence_lat",    "DOUBLE PRECISION"),
+        ("users", "geofence_enabled", "BOOLEAN DEFAULT FALSE"),
         ("users", "geofence_lng",    "DOUBLE PRECISION"),
         ("users", "geofence_radius", "INTEGER DEFAULT 200"),
         ("users", "profile_picture", "TEXT"),
@@ -418,7 +420,7 @@ def staff_login():
     c    = conn.cursor()
     c.execute("""
         SELECT sa.*, s.name, u.company, u.geofence_lat, u.geofence_lng, u.geofence_radius,
-               u.checkin_time, u.checkout_time
+               u.geofence_enabled, u.checkin_time, u.checkout_time
         FROM staff_accounts sa
         JOIN staff s ON s.id=sa.staff_id AND s.user_id=sa.user_id
         JOIN users u ON u.id=sa.user_id
@@ -436,9 +438,10 @@ def staff_login():
         "name":     acc["name"],
         "role":     "staff",
         "geofence": {
-            "lat":    acc["geofence_lat"],
-            "lng":    acc["geofence_lng"],
-            "radius": acc["geofence_radius"]
+            "lat":     acc["geofence_lat"],
+            "lng":     acc["geofence_lng"],
+            "radius":  acc["geofence_radius"],
+            "enabled": acc["geofence_enabled"]
         },
         "schedule": {
             "checkin_time":  acc["checkin_time"]  or "09:00",
@@ -511,7 +514,7 @@ def get_profile():
     conn    = get_db()
     c       = conn.cursor()
     c.execute("""SELECT id, company, email, phone, created_at,
-                        geofence_lat, geofence_lng, geofence_radius,
+                        geofence_lat, geofence_lng, geofence_radius, geofence_enabled,
                         checkin_time, checkout_time
                  FROM users WHERE id=%s""", (current["sub"],))
     user = c.fetchone()
@@ -681,19 +684,24 @@ def set_geofence():
     current = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
-    data   = require_json()
-    lat    = data.get("lat")
-    lng    = data.get("lng")
-    radius = int(data.get("radius", 200))
-    if lat is None or lng is None:
-        abort(400, description="lat and lng are required.")
+    data    = require_json()
+    enabled = bool(data.get("enabled", False))
+    lat     = data.get("lat")
+    lng     = data.get("lng")
+    radius  = int(data.get("radius", 200))
     conn = get_db()
     c    = conn.cursor()
-    c.execute("UPDATE users SET geofence_lat=%s, geofence_lng=%s, geofence_radius=%s WHERE id=%s",
-              (float(lat), float(lng), radius, current["sub"]))
+    if enabled:
+        if lat is None or lng is None:
+            abort(400, description="lat and lng are required when enabling geofence.")
+        c.execute("""UPDATE users SET geofence_lat=%s, geofence_lng=%s,
+                     geofence_radius=%s, geofence_enabled=TRUE WHERE id=%s""",
+                  (float(lat), float(lng), radius, current["sub"]))
+    else:
+        c.execute("UPDATE users SET geofence_enabled=FALSE WHERE id=%s", (current["sub"],))
     conn.commit()
     conn.close()
-    return jsonify({"ok": True, "lat": lat, "lng": lng, "radius": radius})
+    return jsonify({"ok": True, "enabled": enabled, "lat": lat, "lng": lng, "radius": radius})
 
 
 # ── Work schedule config ─────────────────────────────────────────────────────
@@ -861,7 +869,7 @@ def record_attendance():
         settings = c.fetchone()
 
         # Geofence check — applies to ALL roles
-        if settings and settings["geofence_lat"] and lat is not None and lng is not None:
+        if settings and settings.get("geofence_enabled") and settings["geofence_lat"] and lat is not None and lng is not None:
             dist = haversine_m(
                 settings["geofence_lat"], settings["geofence_lng"],
                 float(lat), float(lng)

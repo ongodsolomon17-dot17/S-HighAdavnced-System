@@ -12,6 +12,20 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    .toggle-switch { position:relative;display:inline-block;width:48px;height:26px }
+    .toggle-switch input { opacity:0;width:0;height:0 }
+    .toggle-slider {
+      position:absolute;cursor:pointer;inset:0;background:rgba(255,255,255,0.15);
+      border-radius:34px;transition:.3s
+    }
+    .toggle-slider:before {
+      position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;
+      background:#fff;border-radius:50%;transition:.3s
+    }
+    input:checked + .toggle-slider { background:var(--accent,#3fc1c9) }
+    input:checked + .toggle-slider:before { transform:translateX(22px) }
+  </style>
 </head>
 <body>
 
@@ -559,18 +573,31 @@
         <!-- Geofence -->
         <article class="card">
           <h2>📍 Geofence Settings</h2>
-          <p class="hint">Staff must be within the radius to clock in/out.</p>
-          <div class="form-grid">
-            <label>Office Latitude</label>
-            <input id="geo-lat" type="number" step="any" placeholder="e.g. 4.8156" />
-            <label>Office Longitude</label>
-            <input id="geo-lng" type="number" step="any" placeholder="e.g. 7.0498" />
-            <label>Allowed Radius (metres)</label>
-            <input id="geo-radius" type="number" min="50" max="5000" value="200" />
+          <p class="hint">When enabled, staff must be within the set radius to clock in/out.</p>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <label class="toggle-switch">
+              <input type="checkbox" id="geo-enabled" onchange="toggleGeofenceFields()" />
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="geo-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">
+              Geofencing Off
+            </span>
+          </div>
+          <div id="geo-fields" class="hidden">
+            <div class="form-grid">
+              <label>Office Latitude</label>
+              <input id="geo-lat" type="number" step="any" placeholder="e.g. 4.8156" />
+              <label>Office Longitude</label>
+              <input id="geo-lng" type="number" step="any" placeholder="e.g. 7.0498" />
+              <label>Allowed Radius (metres)</label>
+              <input id="geo-radius" type="number" min="50" max="5000" value="200" />
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="primary" onclick="detectMyLocation()">📡 Use My Location</button>
+            </div>
           </div>
           <div class="button-row" style="margin-top:12px">
-            <button class="primary" onclick="detectMyLocation()">📡 Use My Location</button>
-            <button class="accent"  onclick="saveGeofence()">💾 Save Fence</button>
+            <button class="accent" onclick="saveGeofence()">💾 Save Settings</button>
           </div>
           <p class="hint" id="geo-saved-status" style="margin-top:8px"></p>
         </article>
@@ -745,6 +772,14 @@
   <div class="modal-header">
     <h3 id="scanner-title">QR Scanner</h3>
     <button class="modal-close" id="btn-close-scanner">×</button>
+  </div>
+  <div id="camera-selector-row" class="hidden"
+       style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <label style="font-size:13px;color:var(--text-muted);font-weight:600">📷 Camera:</label>
+    <select id="camera-select" onchange="switchCamera()"
+      style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);
+             background:rgba(255,255,255,0.08);color:var(--text);font-family:inherit;font-size:13px">
+    </select>
   </div>
   <div id="scanner-container"></div>
   <div class="modal-actions">

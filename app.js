@@ -1263,12 +1263,19 @@ document.getElementById("btn-close-viewall")?.addEventListener("click", closeMod
 async function loadSettingsData() {
   try {
     const profile = await apiFetch("/auth/profile");
+    const geoEnabled = profile.geofence_enabled || false;
+    document.getElementById("geo-enabled").checked = geoEnabled;
+    document.getElementById("geo-enabled-label").textContent = geoEnabled ? "Geofencing On ✅" : "Geofencing Off";
+    if (geoEnabled) {
+      document.getElementById("geo-fields").classList.remove("hidden");
+    }
     if (profile.geofence_lat) {
       document.getElementById("geo-lat").value    = profile.geofence_lat;
       document.getElementById("geo-lng").value    = profile.geofence_lng;
       document.getElementById("geo-radius").value = profile.geofence_radius || 200;
-      document.getElementById("geo-saved-status").textContent =
-        `✅ Active: ${profile.geofence_lat.toFixed(4)}, ${profile.geofence_lng.toFixed(4)} (${profile.geofence_radius}m)`;
+      document.getElementById("geo-saved-status").textContent = geoEnabled
+        ? `✅ Active: ${profile.geofence_lat.toFixed(4)}, ${profile.geofence_lng.toFixed(4)} (${profile.geofence_radius}m)`
+        : "";
     }
     if (profile.checkin_time) {
       document.getElementById("sched-checkin").value  = profile.checkin_time;
@@ -1303,6 +1310,12 @@ function toggleIntFields() {
     type === "google_sheets" ? "Apps Script URL" : "Webhook URL";
 }
 
+function toggleGeofenceFields() {
+  const enabled = document.getElementById("geo-enabled").checked;
+  document.getElementById("geo-fields").classList.toggle("hidden", !enabled);
+  document.getElementById("geo-enabled-label").textContent = enabled ? "Geofencing On ✅" : "Geofencing Off";
+}
+
 function detectMyLocation() {
   getGeoPos().then(pos => {
     document.getElementById("geo-lat").value = pos.coords.latitude;
@@ -1312,15 +1325,22 @@ function detectMyLocation() {
 }
 
 async function saveGeofence() {
-  const lat    = parseFloat(document.getElementById("geo-lat").value);
-  const lng    = parseFloat(document.getElementById("geo-lng").value);
-  const radius = parseInt(document.getElementById("geo-radius").value);
-  if (isNaN(lat) || isNaN(lng)) { showToast("Enter valid latitude and longitude.", "error"); return; }
+  const enabled = document.getElementById("geo-enabled").checked;
+  const lat     = parseFloat(document.getElementById("geo-lat")?.value);
+  const lng     = parseFloat(document.getElementById("geo-lng")?.value);
+  const radius  = parseInt(document.getElementById("geo-radius")?.value || 200);
+  if (enabled && (isNaN(lat) || isNaN(lng))) {
+    showToast("Enter valid latitude and longitude.", "error"); return;
+  }
   try {
-    await apiFetch("/settings/geofence", { method: "PUT", body: JSON.stringify({ lat, lng, radius }) });
-    document.getElementById("geo-saved-status").textContent =
-      `✅ Saved: ${lat.toFixed(4)}, ${lng.toFixed(4)} (${radius}m)`;
-    showToast("Geofence saved!", "success");
+    await apiFetch("/settings/geofence", {
+      method: "PUT",
+      body: JSON.stringify({ enabled, lat: enabled ? lat : null, lng: enabled ? lng : null, radius })
+    });
+    document.getElementById("geo-saved-status").textContent = enabled
+      ? `✅ Geofencing ON: ${lat.toFixed(4)}, ${lng.toFixed(4)} (${radius}m)`
+      : "✅ Geofencing disabled.";
+    showToast(enabled ? "Geofence enabled!" : "Geofence disabled!", "success");
   } catch (err) { showToast(err.message, "error"); }
 }
 
@@ -1375,9 +1395,9 @@ async function staffSelfRecord(action) {
   let lat = null, lng = null;
   if (staffGeoPos) { lat = staffGeoPos.coords.latitude; lng = staffGeoPos.coords.longitude; }
 
-  // Check geofence client-side first for UX
+  // Check geofence client-side first for UX (only if enabled)
   const geofence = JSON.parse(sessionStorage.getItem("att_geofence") || "{}");
-  if (geofence.lat && lat) {
+  if (geofence.enabled && geofence.lat && lat) {
     const dist = haversineM(geofence.lat, geofence.lng, lat, lng);
     if (dist > geofence.radius) {
       showToast(`Unable to ${action === "check_in" ? "clock in" : "clock out"} due to location mismatch.`, "error");
@@ -1457,27 +1477,61 @@ async function loadStaffSummary(period) {
 }
 
 // ===== QR Scanner ===========================================================
-let html5Scanner = null;
-function startScan(type) {
+let html5Scanner  = null;
+let scanType      = null;
+let availableCams = [];
+
+async function startScan(type) {
+  scanType = type;
   document.getElementById("scanner-title").textContent =
     type === "check_in" ? "📷 Scan QR – Check In" : "📷 Scan QR – Check Out";
   openModal("scanner-modal");
   const container = document.getElementById("scanner-container");
   container.innerHTML = '<div id="qr-reader" style="width:100%"></div>';
+
+  // List available cameras
+  try {
+    availableCams = await Html5Qrcode.getCameras();
+    const camSel  = document.getElementById("camera-select");
+    if (camSel && availableCams.length > 0) {
+      camSel.innerHTML = availableCams.map((c, i) =>
+        `<option value="${c.id}">${c.label || "Camera " + (i + 1)}</option>`
+      ).join("");
+      document.getElementById("camera-selector-row").classList.remove("hidden");
+      // Default to back camera if available
+      const back = availableCams.find(c => /back|rear|environment/i.test(c.label));
+      if (back) camSel.value = back.id;
+    }
+  } catch (_) {}
+
+  launchScanner();
+}
+
+async function launchScanner() {
+  if (html5Scanner) { await html5Scanner.stop().catch(() => null); html5Scanner = null; }
+  const container = document.getElementById("scanner-container");
+  container.innerHTML = '<div id="qr-reader" style="width:100%"></div>';
   html5Scanner = new Html5Qrcode("qr-reader");
+
+  const camSel    = document.getElementById("camera-select");
+  const cameraId  = camSel && camSel.value ? { deviceId: { exact: camSel.value } } : { facingMode: "environment" };
+
   html5Scanner.start(
-    { facingMode: "environment" },
+    cameraId,
     { fps: 10, qrbox: { width: 250, height: 250 } },
     async decodedText => {
       const staffId = sanitize(decodedText, 20);
       closeModal();
-      // Get location for geofence check
       let lat = null, lng = null;
       if (adminGeoPos) { lat = adminGeoPos.coords.latitude; lng = adminGeoPos.coords.longitude; }
-      try { await recordAttendance(type, staffId, lat, lng); }
+      try { await recordAttendance(scanType, staffId, lat, lng); }
       catch (err) { showToast(err.message, "error"); }
     }
-  ).catch(() => { showToast("Unable to start camera.", "error"); closeModal(); });
+  ).catch(() => { showToast("Unable to start camera. Check permissions.", "error"); closeModal(); });
+}
+
+async function switchCamera() {
+  await launchScanner();
 }
 
 // ===== QR Code ==============================================================
