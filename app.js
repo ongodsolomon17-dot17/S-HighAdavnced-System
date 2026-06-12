@@ -1266,9 +1266,7 @@ async function loadSettingsData() {
     const geoEnabled = profile.geofence_enabled || false;
     document.getElementById("geo-enabled").checked = geoEnabled;
     document.getElementById("geo-enabled-label").textContent = geoEnabled ? "Geofencing On ✅" : "Geofencing Off";
-    if (geoEnabled) {
-      document.getElementById("geo-fields").classList.remove("hidden");
-    }
+    document.getElementById("geo-fields").classList.toggle("hidden", !geoEnabled);
     if (profile.geofence_lat) {
       document.getElementById("geo-lat").value    = profile.geofence_lat;
       document.getElementById("geo-lng").value    = profile.geofence_lng;
@@ -1406,8 +1404,6 @@ async function staffSelfRecord(action) {
   }
 
   const sched = JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
-  const shiftAction = sched.night_checkin_time ? `${action}_${selectedShift}` : action;
-
   const btn = document.getElementById(action === "check_in" ? "btn-staff-checkin" : "btn-staff-checkout");
   btn.disabled = true;
   try {

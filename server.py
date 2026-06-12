@@ -160,8 +160,10 @@ def init_db():
             geofence_lng     DOUBLE PRECISION,
             geofence_radius  INTEGER DEFAULT 200,
             geofence_enabled BOOLEAN DEFAULT FALSE,
-            checkin_time    TEXT DEFAULT '09:00',
-            checkout_time   TEXT DEFAULT '17:00'
+            checkin_time         TEXT DEFAULT '09:00',
+            checkout_time        TEXT DEFAULT '17:00',
+            night_checkin_time   TEXT,
+            night_checkout_time  TEXT
         )
     """)
 
@@ -264,7 +266,9 @@ def init_db():
         ("users", "profile_picture", "TEXT"),
         ("trusted_devices", "staff_id", "TEXT"),
         ("trusted_devices", "status",   "TEXT DEFAULT 'trusted'"),
-        ("users", "checkin_time",    "TEXT DEFAULT '09:00'"),
+        ("users", "checkin_time",        "TEXT DEFAULT '09:00'"),
+        ("users", "night_checkin_time",  "TEXT"),
+        ("users", "night_checkout_time", "TEXT"),
         ("users", "checkout_time",   "TEXT DEFAULT '17:00'"),
         ("attendance", "lat",        "DOUBLE PRECISION"),
         ("attendance", "lng",        "DOUBLE PRECISION"),
@@ -420,7 +424,7 @@ def staff_login():
     c    = conn.cursor()
     c.execute("""
         SELECT sa.*, s.name, u.company, u.geofence_lat, u.geofence_lng, u.geofence_radius,
-               u.geofence_enabled, u.checkin_time, u.checkout_time
+               u.geofence_enabled, u.checkin_time, u.checkout_time, u.night_checkin_time, u.night_checkout_time
         FROM staff_accounts sa
         JOIN staff s ON s.id=sa.staff_id AND s.user_id=sa.user_id
         JOIN users u ON u.id=sa.user_id
@@ -721,11 +725,13 @@ def set_schedule():
         abort(400, description="Times must be in HH:MM format.")
     conn = get_db()
     c    = conn.cursor()
-    c.execute("UPDATE users SET checkin_time=%s, checkout_time=%s WHERE id=%s",
-              (checkin_time, checkout_time, current["sub"]))
+    night_checkin  = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
+    night_checkout = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
+    c.execute("UPDATE users SET checkin_time=%s, checkout_time=%s, night_checkin_time=%s, night_checkout_time=%s WHERE id=%s",
+              (checkin_time, checkout_time, night_checkin, night_checkout, current["sub"]))
     conn.commit()
     conn.close()
-    return jsonify({"ok": True, "checkin_time": checkin_time, "checkout_time": checkout_time})
+    return jsonify({"ok": True, "checkin_time": checkin_time, "checkout_time": checkout_time, "night_checkin_time": night_checkin, "night_checkout_time": night_checkout})
 
 
 # ===== Staff ================================================================
@@ -837,9 +843,23 @@ def list_attendance():
             "WHERE a.user_id=%s ORDER BY a.timestamp DESC",
             (current["sub"],)
         )
-    records = c.fetchall()
+    raw = c.fetchall()
+    c2 = conn.cursor()
+    c2.execute("SELECT checkin_time FROM users WHERE id=%s", (current["sub"],))
+    sched2 = c2.fetchone()
+    ci_time = (sched2["checkin_time"] if sched2 else None) or "09:00"
     conn.close()
-    return jsonify([dict(r) for r in records])
+    results = []
+    for r in raw:
+        rec = dict(r)
+        if rec.get("action") == "check_in":
+            ts = datetime.fromisoformat(rec["timestamp"])
+            grade_label, _ = compute_lateness_grade(ts, ci_time)
+            rec["punctuality_grade"] = grade_label
+        else:
+            rec["punctuality_grade"] = None
+        results.append(rec)
+    return jsonify(results)
 
 
 @app.route("/attendance", methods=["POST"])
@@ -863,7 +883,7 @@ def record_attendance():
     try:
         c = conn.cursor()
         # Load geofence + schedule
-        c.execute("""SELECT geofence_lat, geofence_lng, geofence_radius,
+        c.execute("""SELECT geofence_lat, geofence_lng, geofence_radius, geofence_enabled,
                             checkin_time, checkout_time
                      FROM users WHERE id=%s""", (current["sub"],))
         settings = c.fetchone()
@@ -906,6 +926,12 @@ def attendance_summary():
     now = datetime.utcnow()
     if period == "daily":
         since = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    elif period == "weekly":
+        since = (now - timedelta(days=7)).isoformat()
+    elif period == "monthly":
+        since = (now - timedelta(days=30)).isoformat()
+    elif period == "annual":
+        since = (now - timedelta(days=365)).isoformat()
     else:
         since = (now - timedelta(days=7)).isoformat()
 
