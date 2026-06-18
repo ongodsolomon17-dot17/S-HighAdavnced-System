@@ -212,19 +212,37 @@ function showToast(message, type = "success") {
   else if (type === "error") SoundEngine.fail(Math.floor(Math.random()*6));
 }
 
-// ===== API Fetch ============================================================
+// ===== API Fetch ==========================
 async function apiFetch(path, options = {}, requireAuth = true) {
-  const headers = { "Content-Type": "application/json" };
+  const headers = options.headers ? { ...options.headers } : {};
+  headers["Content-Type"] = "application/json";
+
+  // Always attach Authorization if we have a token and requireAuth is true
   if (requireAuth) {
-    if (!Auth.isLoggedIn()) { showAuthShell(); return; }
+    if (!Auth.isLoggedIn()) {
+      Auth.clear();
+      showAuthShell();
+      throw new Error("Not logged in");
+    }
     headers["Authorization"] = `Bearer ${Auth.token}`;
   }
-  const res  = await fetch(`${API_URL}${path}`, { headers, ...options });
+
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { Auth.clear(); showAuthShell(); throw new Error("Session expired."); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+
+  if (res.status === 401) {
+    Auth.clear();
+    showAuthShell();
+    throw new Error("Session expired.");
+  }
+
+  if (!res.ok) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+
   return data;
 }
+
 
 // ===== Branding =============================================================
 function applyBranding(pictureUrl) {
