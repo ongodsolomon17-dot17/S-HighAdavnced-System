@@ -13,8 +13,11 @@ import math
 import random
 import string
 from datetime import datetime, timedelta, timezone
+import ipaddress
+import urllib.parse
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 512 * 1024  # 512 KB max request body
 
 # ── CORS ───────────────────────────────────────────────────────────────────
 ALLOWED_ORIGINS = os.environ.get(
@@ -25,7 +28,7 @@ ALLOWED_ORIGINS = os.environ.get(
 CORS(app,
      origins=ALLOWED_ORIGINS,
      methods=["GET", "POST", "PUT", "DELETE"],
-     allow_headers=["Content-Type", "Authorization", "X-Admin-Secret"])
+     allow_headers=["Content-Type", "Authorization", "X-Admin-Secret", "X-Device-FP"])
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 DATABASE_URL      = os.environ.get("DATABASE_URL")
@@ -116,6 +119,219 @@ def haversine_m(lat1, lng1, lat2, lng2):
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 
+# ===== Input Security ========================================================
+# Allowed characters for email (RFC 5321 simplified)
+_EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
+# Null byte / control character pattern
+_BAD_CHARS_RE = re.compile(r'[--]')
+
+def clean_string(value: str, max_len: int, field: str) -> str:
+    """Strip dangerous characters and enforce length."""
+    if value is None:
+        return None
+    value = str(value).strip()
+    if _BAD_CHARS_RE.search(value):
+        abort(400, description=f"'{field}' contains invalid characters.")
+    if len(value) > max_len:
+        abort(400, description=f"'{field}' exceeds max length of {max_len}.")
+    return value
+
+def validate_email_format(email: str) -> str:
+    """Validate email format strictly."""
+    email = clean_string(email, MAX_EMAIL_LEN, "email")
+    if not email or not _EMAIL_RE.match(email):
+        abort(400, description="Invalid email address format.")
+    return email.lower()
+
+def get_device_fp() -> str:
+    """Extract device fingerprint from request headers (sent by frontend)."""
+    fp = request.headers.get("X-Device-FP", "")
+    return clean_string(fp, 64, "device_fp") or "unknown"
+
+
+# ===== Progressive Lockout ===================================================
+# Escalation schedule: hours locked per level
+_LOCKOUT_HOURS = [12, 24, 24, 24 * 30]   # level 0→1→2→3→4
+
+def _get_lockout_record(conn, identifier: str, device_fp: str):
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM login_attempts WHERE identifier=%s AND device_fp=%s",
+        (identifier, device_fp)
+    )
+    return c.fetchone()
+
+def check_login_lockout(identifier: str, device_fp: str):
+    """Abort 429 if this identifier+device is currently locked out."""
+    conn = get_db()
+    c    = conn.cursor()
+    now  = datetime.utcnow().isoformat()
+    c.execute(
+        "SELECT attempt_count, locked_until, escalation FROM login_attempts WHERE identifier=%s AND device_fp=%s",
+        (identifier, device_fp)
+    )
+    rec = c.fetchone()
+    conn.close()
+    if not rec:
+        return  # No record — allowed
+    if rec["locked_until"] and rec["locked_until"] > now:
+        unlock = datetime.fromisoformat(rec["locked_until"])
+        diff   = unlock - datetime.utcnow()
+        hours  = int(diff.total_seconds() // 3600)
+        mins   = int((diff.total_seconds() % 3600) // 60)
+        raise Exception(f"Account locked. Try again in {hours}h {mins}m.")
+
+def record_failed_login(identifier: str, device_fp: str):
+    """Increment failure count and apply lockout if threshold reached."""
+    conn = get_db()
+    c    = conn.cursor()
+    now  = datetime.utcnow()
+    c.execute(
+        "SELECT id, attempt_count, locked_until, escalation FROM login_attempts WHERE identifier=%s AND device_fp=%s",
+        (identifier, device_fp)
+    )
+    rec = c.fetchone()
+
+    if not rec:
+        c.execute(
+            "INSERT INTO login_attempts (identifier, device_fp, attempt_count, last_attempt) VALUES (%s,%s,1,%s)",
+            (identifier, device_fp, now.isoformat())
+        )
+        conn.commit(); conn.close()
+        return 1
+
+    new_count  = rec["attempt_count"] + 1
+    escalation = rec["escalation"]
+    locked_until = None
+
+    if new_count >= 4:
+        # Apply lockout at this escalation level
+        hours        = _LOCKOUT_HOURS[min(escalation, len(_LOCKOUT_HOURS)-1)]
+        locked_until = (now + timedelta(hours=hours)).isoformat()
+        new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
+        c.execute(
+            """UPDATE login_attempts
+               SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s
+               WHERE id=%s""",
+            (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
+        )
+    else:
+        c.execute(
+            "UPDATE login_attempts SET attempt_count=%s, last_attempt=%s WHERE id=%s",
+            (new_count, now.isoformat(), rec["id"])
+        )
+
+    conn.commit(); conn.close()
+    return new_count
+
+def record_successful_login(identifier: str, device_fp: str):
+    """Reset failure count on successful login."""
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute(
+        """UPDATE login_attempts SET attempt_count=0, locked_until=NULL, last_attempt=%s
+           WHERE identifier=%s AND device_fp=%s""",
+        (datetime.utcnow().isoformat(), identifier, device_fp)
+    )
+    conn.commit(); conn.close()
+
+
+# ── PIN lockout (per user_id) ────────────────────────────────────────────────
+def check_pin_lockout(user_id: int):
+    conn = get_db()
+    c    = conn.cursor()
+    now  = datetime.utcnow().isoformat()
+    c.execute("SELECT attempt_count, locked_until, escalation FROM pin_attempts WHERE user_id=%s", (user_id,))
+    rec = c.fetchone()
+    conn.close()
+    if not rec: return
+    if rec["locked_until"] and rec["locked_until"] > now:
+        unlock = datetime.fromisoformat(rec["locked_until"])
+        diff   = unlock - datetime.utcnow()
+        hours  = int(diff.total_seconds() // 3600)
+        mins   = int((diff.total_seconds() % 3600) // 60)
+        abort(429, description=f"PIN locked. Try again in {hours}h {mins}m.")
+
+def record_failed_pin(user_id: int):
+    conn = get_db()
+    c    = conn.cursor()
+    now  = datetime.utcnow()
+    c.execute("SELECT id, attempt_count, escalation FROM pin_attempts WHERE user_id=%s", (user_id,))
+    rec = c.fetchone()
+    if not rec:
+        c.execute(
+            "INSERT INTO pin_attempts (user_id, attempt_count, last_attempt) VALUES (%s,1,%s)",
+            (user_id, now.isoformat())
+        )
+        conn.commit(); conn.close(); return
+    new_count  = rec["attempt_count"] + 1
+    escalation = rec["escalation"]
+    locked_until = None
+    if new_count >= 4:
+        hours        = _LOCKOUT_HOURS[min(escalation, len(_LOCKOUT_HOURS)-1)]
+        locked_until = (now + timedelta(hours=hours)).isoformat()
+        new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
+        c.execute(
+            "UPDATE pin_attempts SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s WHERE id=%s",
+            (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
+        )
+    else:
+        c.execute(
+            "UPDATE pin_attempts SET attempt_count=%s, last_attempt=%s WHERE id=%s",
+            (new_count, now.isoformat(), rec["id"])
+        )
+    conn.commit(); conn.close()
+
+def record_successful_pin(user_id: int):
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute(
+        "UPDATE pin_attempts SET attempt_count=0, locked_until=NULL, last_attempt=%s WHERE user_id=%s",
+        (datetime.utcnow().isoformat(), user_id)
+    )
+    conn.commit(); conn.close()
+
+
+# ===== SSRF / Webhook URL Validation =========================================
+_PRIVATE_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+def validate_webhook_url(url: str) -> str:
+    """Block SSRF: reject non-HTTPS, private IPs, localhost, and dangerous schemes."""
+    if not url:
+        abort(400, description="Webhook URL is required.")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        abort(400, description="Webhook URL must use HTTPS.")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        abort(400, description="Webhook URL has no valid hostname.")
+    # Block localhost variants
+    if hostname in ("localhost", "0.0.0.0", "[::]"):
+        abort(400, description="Webhook URL cannot point to localhost.")
+    # Block private/internal IP ranges
+    try:
+        ip = ipaddress.ip_address(hostname)
+        for net in _PRIVATE_NETS:
+            if ip in net:
+                abort(400, description="Webhook URL cannot point to a private or internal IP address.")
+    except ValueError:
+        pass  # Hostname is a domain name, not an IP — allowed
+    return url
+
+
+# ===== Error handler for 429 =================================================
+@app.errorhandler(429)
+def too_many_requests(e): return jsonify({"error": str(e.description)}), 429
+
+
 # ===== Email (Resend) =======================================================
 def send_email(to: str, subject: str, html: str) -> bool:
     if not RESEND_API_KEY:
@@ -163,7 +379,11 @@ def init_db():
             checkin_time         TEXT DEFAULT '09:00',
             checkout_time        TEXT DEFAULT '17:00',
             night_checkin_time   TEXT,
-            night_checkout_time  TEXT
+            night_checkout_time  TEXT,
+            clockout_enabled     BOOLEAN DEFAULT TRUE,
+            night_clockout_enabled BOOLEAN DEFAULT TRUE,
+            sound_enabled        BOOLEAN DEFAULT TRUE,
+            max_devices          INTEGER DEFAULT 3
         )
     """)
 
@@ -247,6 +467,31 @@ def init_db():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id              SERIAL PRIMARY KEY,
+            identifier      TEXT NOT NULL,
+            device_fp       TEXT NOT NULL DEFAULT '',
+            attempt_count   INTEGER NOT NULL DEFAULT 0,
+            locked_until    TEXT,
+            escalation      INTEGER NOT NULL DEFAULT 0,
+            last_attempt    TEXT,
+            UNIQUE (identifier, device_fp)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS pin_attempts (
+            id              SERIAL PRIMARY KEY,
+            user_id         INTEGER NOT NULL UNIQUE,
+            attempt_count   INTEGER NOT NULL DEFAULT 0,
+            locked_until    TEXT,
+            escalation      INTEGER NOT NULL DEFAULT 0,
+            last_attempt    TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS password_resets (
             id         SERIAL PRIMARY KEY,
             email      TEXT   NOT NULL,
@@ -267,8 +512,12 @@ def init_db():
         ("trusted_devices", "staff_id", "TEXT"),
         ("trusted_devices", "status",   "TEXT DEFAULT 'trusted'"),
         ("users", "checkin_time",        "TEXT DEFAULT '09:00'"),
-        ("users", "night_checkin_time",  "TEXT"),
-        ("users", "night_checkout_time", "TEXT"),
+        ("users", "night_checkin_time",   "TEXT"),
+        ("users", "night_checkout_time",  "TEXT"),
+        ("users", "clockout_enabled",       "BOOLEAN DEFAULT TRUE"),
+        ("users", "night_clockout_enabled", "BOOLEAN DEFAULT TRUE"),
+        ("users", "sound_enabled",          "BOOLEAN DEFAULT TRUE"),
+        ("users", "max_devices",            "INTEGER DEFAULT 3"),
         ("users", "checkout_time",   "TEXT DEFAULT '17:00'"),
         ("attendance", "lat",        "DOUBLE PRECISION"),
         ("attendance", "lng",        "DOUBLE PRECISION"),
@@ -341,6 +590,17 @@ def compute_lateness_grade(checkin_ts: datetime, expected_time_str: str):
         return "Unknown", 0
 
 
+# ===== Security Headers =====================================================
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Content-Type-Options"]  = "nosniff"
+    response.headers["X-Frame-Options"]         = "DENY"
+    response.headers["Referrer-Policy"]         = "strict-origin-when-cross-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    response.headers["Cross-Origin-Opener-Policy"]   = "same-origin-allow-popups"
+    return response
+
+
 # ===== Error handlers =======================================================
 @app.errorhandler(400)
 def bad_request(e):  return jsonify({"error": str(e.description)}), 400
@@ -362,11 +622,11 @@ def server_error(e): return jsonify({"error": "Internal server error."}), 500
 @app.route("/auth/register", methods=["POST"])
 def register():
     data     = require_json()
-    company  = sanitize(data.get("company"),  MAX_COMPANY_LEN,  "company")
-    email    = sanitize(data.get("email"),    MAX_EMAIL_LEN,    "email")
-    phone    = sanitize(data.get("phone"),    MAX_PHONE_LEN,    "phone")
-    password = sanitize(data.get("password"), MAX_PASSWORD_LEN, "password")
-    pin      = sanitize(data.get("pin"),      10,               "pin")
+    company  = clean_string(data.get("company"),  MAX_COMPANY_LEN,  "company")
+    email    = validate_email_format(data.get("email", ""))
+    phone    = clean_string(data.get("phone"),    MAX_PHONE_LEN,    "phone")
+    password = clean_string(data.get("password"), MAX_PASSWORD_LEN, "password")
+    pin      = clean_string(data.get("pin"),      10,               "pin")
 
     if not company:  abort(400, description="'company' is required.")
     if not email:    abort(400, description="'email' is required.")
@@ -397,34 +657,54 @@ def register():
 
 @app.route("/auth/login", methods=["POST"])
 def login():
-    data     = require_json()
-    email    = sanitize(data.get("email"),    MAX_EMAIL_LEN,    "email")
-    password = sanitize(data.get("password"), MAX_PASSWORD_LEN, "password")
+    data      = require_json()
+    email     = validate_email_format(data.get("email", ""))
+    password  = clean_string(data.get("password", ""), MAX_PASSWORD_LEN, "password")
+    device_fp = get_device_fp()
     if not email or not password:
         abort(400, description="'email' and 'password' are required.")
+    # Check lockout before hitting DB
+    try:
+        check_login_lockout(email, device_fp)
+    except Exception as e:
+        abort(429, description=str(e))
     conn = get_db()
     c    = conn.cursor()
     c.execute("SELECT * FROM users WHERE email=%s", (email,))
     user = c.fetchone()
     conn.close()
     if not user or not check_password(password, user["password"]):
-        abort(401, description="Incorrect email or password.")
+        count = record_failed_login(email, device_fp)
+        remaining = max(0, 4 - count)
+        msg = "Incorrect email or password."
+        if remaining > 0:
+            msg += f" {remaining} attempt(s) remaining before lockout."
+        else:
+            msg += " Account locked. Check back after lockout period."
+        abort(401, description=msg)
+    record_successful_login(email, device_fp)
     token = create_token(user["id"], user["company"], role="admin")
     return jsonify({"token": token, "company": user["company"], "user_id": user["id"], "role": "admin"})
 
 
 @app.route("/auth/staff-login", methods=["POST"])
 def staff_login():
-    data     = require_json()
-    email    = sanitize(data.get("email"),    MAX_EMAIL_LEN,    "email")
-    password = sanitize(data.get("password"), MAX_PASSWORD_LEN, "password")
+    data      = require_json()
+    email     = validate_email_format(data.get("email", ""))
+    password  = clean_string(data.get("password", ""), MAX_PASSWORD_LEN, "password")
+    device_fp = get_device_fp()
     if not email or not password:
         abort(400, description="'email' and 'password' are required.")
+    try:
+        check_login_lockout(email, device_fp)
+    except Exception as e:
+        abort(429, description=str(e))
     conn = get_db()
     c    = conn.cursor()
     c.execute("""
         SELECT sa.*, s.name, u.company, u.geofence_lat, u.geofence_lng, u.geofence_radius,
-               u.geofence_enabled, u.checkin_time, u.checkout_time, u.night_checkin_time, u.night_checkout_time
+               u.geofence_enabled, u.checkin_time, u.checkout_time, u.night_checkin_time, u.night_checkout_time,
+               u.clockout_enabled, u.night_clockout_enabled, u.sound_enabled
         FROM staff_accounts sa
         JOIN staff s ON s.id=sa.staff_id AND s.user_id=sa.user_id
         JOIN users u ON u.id=sa.user_id
@@ -433,7 +713,15 @@ def staff_login():
     acc = c.fetchone()
     conn.close()
     if not acc or not check_password(password, acc["password"]):
-        abort(401, description="Incorrect email or password.")
+        count = record_failed_login(email, device_fp)
+        remaining = max(0, 4 - count)
+        msg = "Incorrect email or password."
+        if remaining > 0:
+            msg += f" {remaining} attempt(s) remaining."
+        else:
+            msg += " Account locked. Check back after lockout period."
+        abort(401, description=msg)
+    record_successful_login(email, device_fp)
     token = create_token(acc["user_id"], acc["company"], role="staff", staff_id=acc["staff_id"])
     return jsonify({
         "token":    token,
@@ -499,16 +787,33 @@ def staff_register():
 def verify_pin():
     current = get_current_user()
     data    = require_json()
-    pin     = sanitize(data.get("pin"), 10, "pin")
+    pin     = clean_string(data.get("pin", ""), 10, "pin")
     if not pin:
         abort(400, description="'pin' is required.")
+    user_id = current["sub"]
+    # Check PIN lockout
+    check_pin_lockout(user_id)
     conn = get_db()
     c    = conn.cursor()
-    c.execute("SELECT pin FROM users WHERE id=%s", (current["sub"],))
+    c.execute("SELECT pin FROM users WHERE id=%s", (user_id,))
     user = c.fetchone()
     conn.close()
     if not user or not check_password(pin, user["pin"]):
-        abort(403, description="Incorrect PIN.")
+        record_failed_pin(user_id)
+        conn2 = get_db()
+        c2    = conn2.cursor()
+        c2.execute("SELECT attempt_count FROM pin_attempts WHERE user_id=%s", (user_id,))
+        rec   = c2.fetchone()
+        conn2.close()
+        count     = rec["attempt_count"] if rec else 1
+        remaining = max(0, 4 - count)
+        msg = "Incorrect PIN."
+        if remaining > 0:
+            msg += f" {remaining} attempt(s) remaining."
+        else:
+            msg += " PIN locked. Check back after lockout period."
+        abort(403, description=msg)
+    record_successful_pin(user_id)
     return jsonify({"ok": True})
 
 
@@ -519,7 +824,8 @@ def get_profile():
     c       = conn.cursor()
     c.execute("""SELECT id, company, email, phone, created_at,
                         geofence_lat, geofence_lng, geofence_radius, geofence_enabled,
-                        checkin_time, checkout_time
+                        checkin_time, checkout_time, night_checkin_time, night_checkout_time,
+                        clockout_enabled, night_clockout_enabled, sound_enabled, max_devices
                  FROM users WHERE id=%s""", (current["sub"],))
     user = c.fetchone()
     conn.close()
@@ -725,13 +1031,24 @@ def set_schedule():
         abort(400, description="Times must be in HH:MM format.")
     conn = get_db()
     c    = conn.cursor()
-    night_checkin  = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
-    night_checkout = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
-    c.execute("UPDATE users SET checkin_time=%s, checkout_time=%s, night_checkin_time=%s, night_checkout_time=%s WHERE id=%s",
-              (checkin_time, checkout_time, night_checkin, night_checkout, current["sub"]))
+    night_checkin           = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
+    night_checkout          = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
+    clockout_enabled        = bool(data.get("clockout_enabled", True))
+    night_clockout_enabled  = bool(data.get("night_clockout_enabled", True))
+    sound_enabled           = bool(data.get("sound_enabled", True))
+    max_devices             = min(5, max(1, int(data.get("max_devices", 3))))
+    c.execute("""UPDATE users SET checkin_time=%s, checkout_time=%s,
+                 night_checkin_time=%s, night_checkout_time=%s,
+                 clockout_enabled=%s, night_clockout_enabled=%s,
+                 sound_enabled=%s, max_devices=%s WHERE id=%s""",
+              (checkin_time, checkout_time, night_checkin, night_checkout,
+               clockout_enabled, night_clockout_enabled, sound_enabled, max_devices, current["sub"]))
     conn.commit()
     conn.close()
-    return jsonify({"ok": True, "checkin_time": checkin_time, "checkout_time": checkout_time, "night_checkin_time": night_checkin, "night_checkout_time": night_checkout})
+    return jsonify({"ok": True, "checkin_time": checkin_time, "checkout_time": checkout_time,
+                    "night_checkin_time": night_checkin, "night_checkout_time": night_checkout,
+                    "clockout_enabled": clockout_enabled, "night_clockout_enabled": night_clockout_enabled,
+                    "sound_enabled": sound_enabled, "max_devices": max_devices})
 
 
 # ===== Staff ================================================================
@@ -1218,7 +1535,11 @@ def push_to_integration():
         url = cfg.get("url")
         if not url:
             abort(400, description="Webhook URL not set.")
-        payload = json.dumps(data_to_push).encode()
+        validate_webhook_url(url)  # Re-validate at push time
+        # Sanitize payload — only allow safe scalar values
+        safe_payload = {k: v for k, v in data_to_push.items()
+                        if isinstance(v, (str, int, float, bool)) or v is None}
+        payload = json.dumps(safe_payload).encode()
         req = urllib.request.Request(url, data=payload,
                                      headers={"Content-Type": "application/json"}, method="POST")
         try:
@@ -1231,7 +1552,10 @@ def push_to_integration():
         url = cfg.get("apps_script_url")
         if not url:
             abort(400, description="Google Apps Script URL not set.")
-        payload = json.dumps(data_to_push).encode()
+        validate_webhook_url(url)  # Re-validate at push time
+        safe_payload = {k: v for k, v in data_to_push.items()
+                        if isinstance(v, (str, int, float, bool)) or v is None}
+        payload = json.dumps(safe_payload).encode()
         req = urllib.request.Request(url, data=payload,
                                      headers={"Content-Type": "application/json"}, method="POST")
         try:
@@ -1634,6 +1958,15 @@ def trust_device():
     now = datetime.utcnow().isoformat()
     conn = get_db()
     c    = conn.cursor()
+    # Check max_devices limit for admins
+    c.execute("SELECT max_devices FROM users WHERE id=%s", (current["sub"],))
+    u = c.fetchone()
+    max_d = u["max_devices"] if u else 3
+    c.execute("SELECT COUNT(*) AS n FROM trusted_devices WHERE user_id=%s AND role='admin' AND status='trusted'", (current["sub"],))
+    cur_count = c.fetchone()["n"]
+    if cur_count >= max_d:
+        conn.close()
+        abort(400, description=f"Max trusted devices limit ({max_d}) reached. Revoke an existing device first.")
     c.execute("""
         INSERT INTO trusted_devices
         (user_id, role, device_fingerprint, device_name, created_at, last_used, expires_at, status)

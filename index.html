@@ -3,36 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>S Advanced Attendance</title>
+  <meta name="theme-color" content="#0b1733" />
+  <title>S High Advanced Attendance</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <style>
-    .toggle-switch { position:relative;display:inline-block;width:48px;height:26px }
-    .toggle-switch input { opacity:0;width:0;height:0 }
-    .toggle-slider {
-      position:absolute;cursor:pointer;inset:0;background:rgba(255,255,255,0.15);
-      border-radius:34px;transition:.3s
-    }
-    .toggle-slider:before {
-      position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;
-      background:#fff;border-radius:50%;transition:.3s
-    }
-    input:checked + .toggle-slider { background:var(--accent,#3fc1c9) }
-    input:checked + .toggle-slider:before { transform:translateX(22px) }
-  </style>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
-<!-- ══════ AUTH ══════ -->
-<div id="auth-shell" class="auth-shell">
+<!-- ══════ SPLASH SCREEN ══════ -->
+<div id="splash-screen">
   <div class="auth-blobs">
-    <div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+  <div class="splash-logo-wrap">
+    <div class="splash-ring"></div>
+    <div class="splash-ring-2"></div>
+    <div class="splash-s" id="splash-badge">S</div>
+  </div>
+  <div class="splash-title">S High Advanced System</div>
+  <div class="splash-sub">Attendance Management</div>
+  <div class="splash-dots">
+    <span></span><span></span><span></span>
+  </div>
+</div>
+
+<!-- ══════ AUTH ══════ -->
+<div id="auth-shell" class="auth-shell hidden">
+  <div class="auth-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="blob blob-4"></div>
   </div>
   <div class="auth-card">
     <div class="auth-logo">
@@ -69,7 +78,7 @@
         <button class="auth-submit" id="btn-login" onclick="handleLogin()">
           <span>Sign In</span><div class="btn-spinner hidden" id="login-spinner"></div>
         </button>
-        <p style="text-align:center;margin-top:12px">
+        <p style="text-align:center;margin-top:10px">
           <a href="#" class="forgot-link" onclick="showForgotPassword('admin')">Forgot password?</a>
         </p>
       </div>
@@ -102,10 +111,8 @@
           </div>
         </div>
         <div class="field-group">
-          <label>Admin PIN <span class="req">*</span>
-            <span class="field-hint">4–8 digits</span>
-          </label>
-          <input id="reg-pin" type="password" maxlength="8" placeholder="e.g. 1234" inputmode="numeric" pattern="\d*" />
+          <label>Admin PIN <span class="req">*</span> <span class="field-hint">4–8 digits</span></label>
+          <input id="reg-pin" type="password" maxlength="8" placeholder="e.g. 1234" inputmode="numeric" />
         </div>
         <button class="auth-submit" id="btn-register" onclick="handleRegister()">
           <span>Create Account</span><div class="btn-spinner hidden" id="register-spinner"></div>
@@ -134,12 +141,12 @@
         <button class="auth-submit" id="btn-staff-login" onclick="handleStaffLogin()">
           <span>Sign In</span><div class="btn-spinner hidden" id="staff-login-spinner"></div>
         </button>
-        <p style="text-align:center;margin-top:12px">
+        <p style="text-align:center;margin-top:10px">
           <a href="#" class="forgot-link" onclick="showForgotPassword('staff')">Forgot password?</a>
         </p>
       </div>
       <div id="staff-form-register" class="auth-form hidden">
-        <p class="field-hint" style="margin-bottom:12px">Link your staff ID to create a personal login.</p>
+        <p class="hint" style="margin-bottom:12px">Link your staff ID to create a personal login.</p>
         <div class="field-group">
           <label>Company Admin Email <span class="req">*</span></label>
           <input id="sreg-company-email" type="email" placeholder="admin@company.com" />
@@ -180,75 +187,64 @@
       </div>
     </div>
     <div class="header-actions">
-      <button class="pill" onclick="switchMainStaffTab('portal')">🏠 Portal</button>
-      <button class="pill danger-pill" onclick="handleLogout()">Sign Out</button>
+      <button id="staff-mute-btn" class="pill" onclick="toggleStaffMute()" title="Mute/unmute sounds">🔔</button>
+      <button class="danger-pill pill" onclick="confirmSignOut()">Sign Out</button>
     </div>
   </header>
-  <main>
 
-    <!-- Staff Portal Tab -->
-    <div id="staff-tab-portal">
-      <!-- Notice banner -->
-      <div id="staff-notices-bar" style="display:none;margin-bottom:16px"></div>
+  <div id="staff-notices-bar" style="display:none;margin-bottom:16px"></div>
 
-      <section class="grid-two">
-        <article class="card">
-          <h2>My QR Code</h2>
-          <p class="hint">Show this to the scanner for check-in / check-out.</p>
-          <div id="staff-qr-display" style="display:flex;justify-content:center;padding:16px 0"></div>
-          <div class="button-row" style="justify-content:center;margin-top:8px">
-            <a id="staff-qr-download" download="my-qr.png"
-               style="text-decoration:none;border-radius:14px;padding:10px 20px;font-weight:700;
-                      background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:white;display:inline-block;">
-              ⬇ Download QR
-            </a>
-          </div>
-        </article>
+  <section class="grid-two">
+    <article class="card">
+      <h2>My QR Code</h2>
+      <p class="hint">Show this to the scanner for check-in / check-out.</p>
+      <div id="staff-qr-display" style="display:flex;justify-content:center;padding:16px 0"></div>
+      <div class="button-row" style="justify-content:center;margin-top:8px">
+        <a id="staff-qr-download" download="my-qr.png" class="primary"
+           style="text-decoration:none;padding:11px 20px;border-radius:14px;font-weight:700;font-size:0.88rem">
+          ⬇ Download QR
+        </a>
+      </div>
+    </article>
 
-        <article class="card">
-          <h2>Clock In / Out</h2>
-          <p class="hint" id="geo-status-staff">Getting your location…</p>
-          <p class="hint" id="staff-schedule-display" style="margin-top:4px;color:var(--accent)"></p>
-          <!-- Shift selector (shown only if shifts configured) -->
-          <div id="shift-selector" class="hidden" style="margin:12px 0">
-            <label style="font-size:13px;color:var(--text-muted);font-weight:600">Select Shift</label>
-            <div style="display:flex;gap:8px;margin-top:6px">
-              <button class="pill active" id="shift-btn-day"   onclick="selectShift('day')">☀️ Day Shift</button>
-              <button class="pill"        id="shift-btn-night" onclick="selectShift('night')">🌙 Night Shift</button>
-            </div>
-          </div>
-          <div class="button-row" style="flex-direction:column;gap:12px;margin-top:16px">
-            <button class="accent" style="width:100%" id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">✅ Clock In</button>
-            <button class="accent" style="width:100%" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">🚪 Clock Out</button>
-          </div>
-        </article>
-      </section>
+    <article class="card">
+      <h2>Clock In / Out</h2>
+      <p class="hint" id="geo-status-staff">Getting your location…</p>
+      <p class="hint" id="staff-schedule-display" style="margin-top:4px;color:var(--accent)"></p>
+      <div id="shift-selector" class="hidden" style="margin:12px 0">
+        <label style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:6px;display:block">Select Shift</label>
+        <div style="display:flex;gap:8px">
+          <button class="pill active" id="shift-btn-day"   onclick="selectShift('day')">☀️ Day Shift</button>
+          <button class="pill"        id="shift-btn-night" onclick="selectShift('night')">🌙 Night Shift</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+        <button class="primary"   id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">✅ Clock In</button>
+        <button class="secondary" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">🚪 Clock Out</button>
+      </div>
+    </article>
+  </section>
 
-      <section>
-        <article class="card wide-card">
-          <div class="card-header">
-            <h2>My Attendance Summary</h2>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="pill active" id="sbtn-daily"   onclick="loadStaffSummary('daily')">Today</button>
-              <button class="pill"        id="sbtn-weekly"  onclick="loadStaffSummary('weekly')">Weekly</button>
-              <button class="pill"        id="sbtn-monthly" onclick="loadStaffSummary('monthly')">Monthly</button>
-              <button class="pill"        id="sbtn-annual"  onclick="loadStaffSummary('annual')">Annual</button>
-            </div>
-          </div>
-          <div id="staff-summary-stats" class="summary-card-row"></div>
-          <div class="table-wrap" style="margin-top:16px">
-            <table id="staff-att-table">
-              <thead><tr><th>Date</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-    </div>
-
-
-
-  </main>
+  <section>
+    <article class="card wide-card">
+      <div class="card-header">
+        <h2>My Attendance Summary</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="pill active" id="sbtn-daily"   onclick="loadStaffSummary('daily')">Today</button>
+          <button class="pill"        id="sbtn-weekly"  onclick="loadStaffSummary('weekly')">Weekly</button>
+          <button class="pill"        id="sbtn-monthly" onclick="loadStaffSummary('monthly')">Monthly</button>
+          <button class="pill"        id="sbtn-annual"  onclick="loadStaffSummary('annual')">Annual</button>
+        </div>
+      </div>
+      <div id="staff-summary-stats" class="summary-card-row"></div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table id="staff-att-table">
+          <thead><tr><th>Date</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </article>
+  </section>
   <footer class="app-footer"><p>S Advanced Attendance — Staff Portal</p></footer>
 </div>
 
@@ -265,19 +261,35 @@
     </div>
     <div class="header-actions">
       <button id="btn-view-staff" class="pill">⟳ Refresh</button>
-      <button class="pill danger-pill" onclick="handleLogout()">Sign Out</button>
+      <button class="danger-pill pill" onclick="confirmSignOut()">Sign Out</button>
     </div>
   </header>
 
-  <nav class="app-nav">
-    <button class="nav-tab active" data-tab="dashboard"  onclick="switchMainTab('dashboard')">📊 Dashboard</button>
-    <button class="nav-tab"        data-tab="staff"       onclick="switchMainTab('staff')">👥 Staff</button>
-    <button class="nav-tab"        data-tab="attendance"  onclick="switchMainTab('attendance')">📋 Attendance</button>
-    <button class="nav-tab"        data-tab="reports"     onclick="switchMainTab('reports')">📑 Reports</button>
-    <button class="nav-tab"        data-tab="analytics"   onclick="switchMainTab('analytics')">🤖 Analytics</button>
-    <button class="nav-tab"        data-tab="notices"     onclick="switchMainTab('notices')">📢 Notices</button>
-    <button class="nav-tab"        data-tab="settings"    onclick="switchMainTab('settings')">⚙️ Settings</button>
-    <button class="nav-tab"        data-tab="feedback"    onclick="switchMainTab('feedback')">💬 Feedback</button>
+  <nav class="app-nav" id="admin-nav">
+    <button class="nav-tab active" data-tab="dashboard"  onclick="switchMainTab('dashboard')">
+      <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+    </button>
+    <button class="nav-tab" data-tab="staff"       onclick="switchMainTab('staff')">
+      <span class="nav-icon">👥</span><span class="nav-label">Staff</span>
+    </button>
+    <button class="nav-tab" data-tab="attendance"  onclick="switchMainTab('attendance')">
+      <span class="nav-icon">📋</span><span class="nav-label">Attendance</span>
+    </button>
+    <button class="nav-tab" data-tab="reports"     onclick="switchMainTab('reports')">
+      <span class="nav-icon">📑</span><span class="nav-label">Reports</span>
+    </button>
+    <button class="nav-tab" data-tab="analytics"   onclick="switchMainTab('analytics')">
+      <span class="nav-icon">🤖</span><span class="nav-label">Analytics</span>
+    </button>
+    <button class="nav-tab" data-tab="notices"     onclick="switchMainTab('notices')">
+      <span class="nav-icon">📢</span><span class="nav-label">Notices</span>
+    </button>
+    <button class="nav-tab" data-tab="feedback"    onclick="switchMainTab('feedback')">
+      <span class="nav-icon">💬</span><span class="nav-label">Feedback</span>
+    </button>
+    <button class="nav-tab" data-tab="settings"    onclick="switchMainTab('settings')">
+      <span class="nav-icon">⚙️</span><span class="nav-label">Settings</span>
+    </button>
   </nav>
 
   <main>
@@ -296,7 +308,7 @@
       </article>
       <article class="card wide-card">
         <div class="card-header">
-          <h2>Weekly Attendance Summary</h2>
+          <h2>Attendance Summary</h2>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="pill active" id="dash-period-daily"   onclick="switchDashPeriod('daily')">Today</button>
             <button class="pill"        id="dash-period-weekly"  onclick="switchDashPeriod('weekly')">Weekly</button>
@@ -322,31 +334,35 @@
             <span>✏️ Editing: <strong id="update-banner-id"></strong></span>
             <button id="btn-cancel-update" type="button">Cancel</button>
           </div>
-          <div id="staff-form" class="form-grid">
-            <label>Name <span style="color:var(--danger)">*</span></label>
-            <input id="staff-name"  type="text"  maxlength="80"  autocomplete="off" placeholder="Full name" />
+          <div id="staff-form" class="form-grid" style="margin-top:12px">
+            <label>Name <span class="req">*</span></label>
+            <input id="staff-name"  type="text"  maxlength="80"  placeholder="Full name" />
             <label>Email</label>
-            <input id="staff-email" type="email" maxlength="120" autocomplete="off" placeholder="email@example.com" />
+            <input id="staff-email" type="email" maxlength="120" placeholder="email@example.com" />
             <label>Phone</label>
-            <input id="staff-phone" type="tel"   maxlength="30"  autocomplete="off" placeholder="+234 000 0000" />
-            <label>Staff ID <span style="color:var(--text-muted);font-size:0.8rem">(auto-generated)</span></label>
-            <input id="staff-id"    type="text"  maxlength="20"  readonly placeholder="Auto" />
-            <div class="button-row">
-              <button type="button" id="btn-submit-staff" class="primary">Add Staff</button>
+            <input id="staff-phone" type="tel"   maxlength="30"  placeholder="+234 000 0000" />
+            <label>Staff ID</label>
+            <input id="staff-id"    type="text"  maxlength="20"  readonly placeholder="Auto-generated" />
+            <div style="grid-column:1/-1">
+              <button type="button" id="btn-submit-staff" class="primary" style="width:100%">Add Staff</button>
             </div>
           </div>
-          <p class="hint">Right-click (PC) or long-press (mobile) a row to update, remove, or generate QR.</p>
+          <p class="hint" style="margin-top:12px">Right-click (PC) or long-press (mobile) a row to update, remove, or generate QR.</p>
         </article>
 
         <article class="card">
           <h2>Attendance Actions</h2>
-          <div class="form-grid">
-            <label>Select Staff</label>
-            <select id="attendance-staff"><option value="">-- select staff --</option></select>
+          <!-- Staff Search -->
+          <div class="search-dropdown-wrap" style="margin-bottom:14px">
+            <input id="staff-search-input" type="text" placeholder="🔍 Search staff by name…"
+                   oninput="searchStaffLive(this.value, 'attendance')" autocomplete="off" />
+            <div id="staff-search-results" class="search-results hidden"></div>
+            <input id="attendance-staff" type="hidden" />
+            <div id="selected-staff-display" style="margin-top:8px;font-size:13px;color:var(--accent);font-weight:600;min-height:20px"></div>
           </div>
           <div class="button-row">
-            <button id="btn-scan-checkin"  class="accent">📷 Scan QR Check-In</button>
-            <button id="btn-scan-checkout" class="accent">📷 Scan QR Check-Out</button>
+            <button id="btn-scan-checkin"  class="accent">📷 Scan Check-In</button>
+            <button id="btn-scan-checkout" class="accent">📷 Scan Check-Out</button>
           </div>
           <div class="button-row" style="margin-top:8px">
             <button id="btn-manual-checkin"  class="secondary">✅ Manual Check-In</button>
@@ -355,6 +371,7 @@
           <p class="hint" id="admin-geo-status" style="margin-top:8px"></p>
         </article>
       </div>
+
       <article class="card wide-card">
         <div class="card-header">
           <h2>Registered Staff</h2>
@@ -366,7 +383,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint">Right-click (PC) or long-press (mobile) a row for actions.</p>
+        <p class="hint" style="margin-top:8px">Right-click (PC) or long-press (mobile) a row for actions.</p>
       </article>
     </section>
 
@@ -396,8 +413,14 @@
         <div class="form-grid" style="max-width:500px">
           <label>From Date</label><input type="date" id="report-from" />
           <label>To Date</label>  <input type="date" id="report-to" />
-          <label>Staff (optional)</label>
-          <select id="report-staff"><option value="">All staff</option></select>
+          <label>Staff</label>
+          <div class="search-dropdown-wrap">
+            <input id="report-search-input" type="text" placeholder="🔍 Search staff or leave blank for all…"
+                   oninput="searchStaffLive(this.value, 'report')" autocomplete="off" />
+            <div id="report-search-results" class="search-results hidden"></div>
+            <input id="report-staff-id" type="hidden" />
+            <div id="report-staff-display" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600;min-height:18px"></div>
+          </div>
         </div>
         <div class="button-row" style="margin-top:16px">
           <button class="primary" onclick="generateReport()">📊 Generate</button>
@@ -427,27 +450,12 @@
         <div class="kpi-card"><div class="kpi-val" id="ai-still-in">—</div><div class="kpi-label">Still Clocked In</div></div>
       </div>
       <div class="grid-two">
-        <article class="card">
-          <h2>🏆 Top Performers (30d)</h2>
-          <ul class="performer-list" id="top-performers"></ul>
-        </article>
-        <article class="card">
-          <h2>⚠️ Low Attendance (30d)</h2>
-          <ul class="performer-list" id="low-attendance"></ul>
-        </article>
-        <article class="card">
-          <h2>🟢 Still Clocked In Today</h2>
-          <ul class="performer-list" id="still-clocked"></ul>
-        </article>
-        <article class="card">
-          <h2>⏰ Punctuality Breakdown (30d)</h2>
-          <canvas id="lateness-chart" height="140"></canvas>
-        </article>
+        <article class="card"><h2>🏆 Top Performers (30d)</h2><ul class="performer-list" id="top-performers"></ul></article>
+        <article class="card"><h2>⚠️ Low Attendance (30d)</h2><ul class="performer-list" id="low-attendance"></ul></article>
+        <article class="card"><h2>🟢 Still Clocked In Today</h2><ul class="performer-list" id="still-clocked"></ul></article>
+        <article class="card"><h2>⏰ Punctuality Breakdown (30d)</h2><canvas id="lateness-chart" height="140"></canvas></article>
       </div>
-      <article class="card wide-card">
-        <h2>Attendance Frequency (30d)</h2>
-        <canvas id="freq-chart" height="80"></canvas>
-      </article>
+      <article class="card wide-card"><h2>Attendance Frequency (30d)</h2><canvas id="freq-chart" height="80"></canvas></article>
     </section>
 
     <!-- NOTICES -->
@@ -455,27 +463,23 @@
       <div class="grid-two">
         <article class="card">
           <h2>📢 Post a Notice</h2>
-          <div class="form-grid">
+          <div class="form-grid" style="margin-top:8px">
             <label>Title <span class="req">*</span></label>
             <input id="notice-title" type="text" maxlength="120" placeholder="Notice title" />
             <label>Message <span class="req">*</span></label>
-            <textarea id="notice-body" rows="4" maxlength="500"
-              style="resize:vertical;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);
-                     background:rgba(255,255,255,0.07);color:var(--text);font-family:inherit;font-size:14px"
-              placeholder="Write your notice here…"></textarea>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="notice-pinned" />
-              <span>📌 Pin this notice</span>
+            <textarea id="notice-body" rows="4" maxlength="500" placeholder="Write your notice here…"
+              style="resize:vertical;padding:10px 14px;border-radius:12px;
+                     border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);
+                     color:var(--text);font-family:inherit;font-size:14px"></textarea>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;grid-column:1/-1">
+              <input type="checkbox" id="notice-pinned" /> <span>📌 Pin this notice</span>
             </label>
           </div>
           <div class="button-row" style="margin-top:12px">
             <button class="primary" onclick="postNotice()">Post Notice</button>
           </div>
         </article>
-        <article class="card">
-          <h2>Active Notices</h2>
-          <div id="notices-list"><p class="hint">No notices yet.</p></div>
-        </article>
+        <article class="card"><h2>Active Notices</h2><div id="notices-list"><p class="hint">No notices yet.</p></div></article>
       </div>
     </section>
 
@@ -492,10 +496,10 @@
             <span onclick="setRating(5)">⭐</span>
           </div>
           <label>Message <span class="req">*</span></label>
-          <textarea id="feedback-message" rows="5" maxlength="1000"
-            style="resize:vertical;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);
-                   background:rgba(255,255,255,0.07);color:var(--text);font-family:inherit;font-size:14px"
-            placeholder="Write your feedback here…"></textarea>
+          <textarea id="feedback-message" rows="5" maxlength="1000" placeholder="Write your feedback here…"
+            style="resize:vertical;padding:10px 14px;border-radius:12px;
+                   border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);
+                   color:var(--text);font-family:inherit;font-size:14px"></textarea>
         </div>
         <div class="button-row" style="margin-top:16px">
           <button class="primary" onclick="submitFeedback()">
@@ -511,18 +515,20 @@
     <section id="tab-settings" class="tab-panel hidden">
       <div class="grid-two">
 
-        <!-- Profile -->
+        <!-- Profile Picture -->
         <article class="card">
           <h2>👤 Company Profile</h2>
           <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
             <div id="profile-pic-preview" style="width:72px;height:72px;border-radius:50%;
                  background:linear-gradient(135deg,#3fc1c9,#2c9ea1);display:flex;align-items:center;
-                 justify-content:center;font-size:28px;font-weight:800;color:#fff;overflow:hidden;flex-shrink:0">S</div>
+                 justify-content:center;font-size:28px;font-weight:800;color:#fff;overflow:hidden;flex-shrink:0;
+                 box-shadow:0 0 24px var(--accent-glow)">S</div>
             <div>
-              <p class="hint">Upload your company logo. It will appear across all staff interfaces.</p>
+              <p class="hint">Upload your company logo. Shows across all staff interfaces.</p>
               <div class="button-row" style="margin-top:8px">
-                <label class="primary" style="cursor:pointer;padding:8px 16px;border-radius:10px;
-                       background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:#fff;font-weight:700;font-size:13px">
+                <label class="primary" style="cursor:pointer;padding:9px 16px;border-radius:12px;
+                       background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:#fff;
+                       font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px">
                   📷 Upload Logo
                   <input type="file" id="profile-pic-input" accept="image/jpeg,image/png,image/webp"
                          style="display:none" onchange="handleProfilePicUpload(this)" />
@@ -544,24 +550,24 @@
           <div id="profile-edit-form" class="hidden">
             <div class="form-grid" style="margin-top:12px">
               <label>Company Name</label>
-              <input id="edit-company" type="text" maxlength="80" placeholder="Company name" />
+              <input id="edit-company" type="text" maxlength="80" />
               <label>Email</label>
-              <input id="edit-email" type="email" maxlength="120" placeholder="Email address" />
+              <input id="edit-email" type="email" maxlength="120" />
               <label>Phone</label>
-              <input id="edit-phone" type="tel" maxlength="30" placeholder="Phone number" />
+              <input id="edit-phone" type="tel" maxlength="30" />
             </div>
             <div class="button-row" style="margin-top:12px">
               <button class="primary" onclick="saveProfileEdit()">💾 Save Changes</button>
             </div>
-            <hr style="border-color:rgba(255,255,255,0.1);margin:16px 0" />
+            <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
             <div class="form-grid">
               <label>New Password</label>
               <div class="input-eye">
-                <input id="edit-new-password" type="password" maxlength="128" placeholder="Leave blank to keep current" />
+                <input id="edit-new-password" type="password" maxlength="128" placeholder="Leave blank to keep" />
                 <button type="button" class="eye-btn" onclick="toggleEye('edit-new-password',this)">👁</button>
               </div>
               <label>New PIN</label>
-              <input id="edit-new-pin" type="password" maxlength="8" placeholder="Leave blank to keep current" inputmode="numeric" />
+              <input id="edit-new-pin" type="password" maxlength="8" placeholder="Leave blank to keep" inputmode="numeric" />
             </div>
             <div class="button-row" style="margin-top:12px">
               <button class="accent" onclick="savePasswordPin()">🔑 Update Password/PIN</button>
@@ -574,25 +580,20 @@
         <article class="card">
           <h2>📍 Geofence Settings</h2>
           <p class="hint">When enabled, staff must be within the set radius to clock in/out.</p>
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:12px;margin:14px 0">
             <label class="toggle-switch">
               <input type="checkbox" id="geo-enabled" onchange="toggleGeofenceFields()" />
               <span class="toggle-slider"></span>
             </label>
-            <span id="geo-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">
-              Geofencing Off
-            </span>
+            <span id="geo-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">Geofencing Off</span>
           </div>
           <div id="geo-fields" class="hidden">
             <div class="form-grid">
-              <label>Office Latitude</label>
-              <input id="geo-lat" type="number" step="any" placeholder="e.g. 4.8156" />
-              <label>Office Longitude</label>
-              <input id="geo-lng" type="number" step="any" placeholder="e.g. 7.0498" />
-              <label>Allowed Radius (metres)</label>
-              <input id="geo-radius" type="number" min="50" max="5000" value="200" />
+              <label>Office Latitude</label>  <input id="geo-lat" type="number" step="any" placeholder="e.g. 4.8156" />
+              <label>Office Longitude</label> <input id="geo-lng" type="number" step="any" placeholder="e.g. 7.0498" />
+              <label>Radius (metres)</label>  <input id="geo-radius" type="number" min="50" max="5000" value="200" />
             </div>
-            <div class="button-row" style="margin-top:12px">
+            <div class="button-row" style="margin-top:10px">
               <button class="primary" onclick="detectMyLocation()">📡 Use My Location</button>
             </div>
           </div>
@@ -602,62 +603,94 @@
           <p class="hint" id="geo-saved-status" style="margin-top:8px"></p>
         </article>
 
-        <!-- Work Schedule -->
+        <!-- Work Schedule & Clock-out Toggle -->
         <article class="card">
           <h2>🕐 Work Schedule</h2>
-          <p class="hint">Set expected check-in/out times for punctuality grading.</p>
-          <div class="form-grid">
-            <label>Expected Check-In Time</label>
-            <input id="sched-checkin" type="time" value="09:00" />
-            <label>Expected Check-Out Time</label>
-            <input id="sched-checkout" type="time" value="17:00" />
+          <p class="hint">Set shift times and control clock-out availability.</p>
+          <div class="form-grid" style="margin-top:12px">
+            <label>Check-In Time</label>  <input id="sched-checkin"  type="time" value="09:00" />
+            <label>Check-Out Time</label> <input id="sched-checkout" type="time" value="17:00" />
+            <label style="grid-column:1/-1;margin-top:4px;display:flex;align-items:center;gap:10px">
+              <label class="toggle-switch">
+                <input type="checkbox" id="clockout-enabled" checked />
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="font-size:13px;font-weight:600">Enable Day Shift Clock-Out</span>
+            </label>
           </div>
-          <div style="margin-top:14px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px">
-              <input type="checkbox" id="enable-night-shift" onchange="toggleNightShift()" />
+          <div style="margin-top:16px">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
+              <label class="toggle-switch">
+                <input type="checkbox" id="enable-night-shift" onchange="toggleNightShift()" />
+                <span class="toggle-slider"></span>
+              </label>
               <span style="font-size:13px;font-weight:600">🌙 Enable Night Shift</span>
             </label>
             <div id="night-shift-fields" class="hidden">
               <div class="form-grid">
-                <label>Night Shift Check-In</label>
-                <input id="sched-night-checkin" type="time" value="22:00" />
-                <label>Night Shift Check-Out</label>
-                <input id="sched-night-checkout" type="time" value="06:00" />
+                <label>Night Check-In</label>  <input id="sched-night-checkin"  type="time" value="22:00" />
+                <label>Night Check-Out</label> <input id="sched-night-checkout" type="time" value="06:00" />
+                <label style="grid-column:1/-1;display:flex;align-items:center;gap:10px">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="night-clockout-enabled" checked />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span style="font-size:13px;font-weight:600">Enable Night Shift Clock-Out</span>
+                </label>
               </div>
             </div>
           </div>
-          <div class="button-row" style="margin-top:12px">
+          <div class="button-row" style="margin-top:14px">
             <button class="accent" onclick="saveSchedule()">💾 Save Schedule</button>
           </div>
           <p class="hint" id="sched-status" style="margin-top:8px"></p>
         </article>
 
-        <!-- Pending Device Requests -->
-        <article class="card wide-card" style="grid-column:1/-1">
-          <div class="card-header">
-            <h2>📱 Pending Device Requests
-              <span id="pending-devices-badge" class="hidden"
-                style="display:inline-block;background:var(--danger);color:#fff;
-                       border-radius:20px;padding:2px 10px;font-size:12px;
-                       font-weight:700;margin-left:8px">0</span>
-            </h2>
-            <button class="pill" onclick="loadPendingDevices()">🔄 Refresh</button>
+        <!-- Sound Settings -->
+        <article class="card">
+          <h2>🔊 Sound Settings</h2>
+          <p class="hint">Enable tick/decline sounds for check-in events. Staff can mute from their portal.</p>
+          <div style="display:flex;align-items:center;gap:12px;margin:14px 0">
+            <label class="toggle-switch">
+              <input type="checkbox" id="sound-enabled" onchange="saveSoundSetting()" />
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="sound-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">Sounds Off</span>
           </div>
-          <p class="hint">Staff trying to log in from unrecognised devices. Approve for 20-hour temporary access or reject.</p>
-          <div id="pending-devices-list" style="margin-top:12px"><p class="hint">Loading…</p></div>
+          <div class="button-row" style="margin-top:8px">
+            <button class="secondary" onclick="testSuccessSound()">▶ Test Success Sound</button>
+            <button class="secondary" onclick="testFailSound()">▶ Test Fail Sound</button>
+          </div>
         </article>
 
-        <!-- Trusted Devices -->
+        <!-- Max Trusted Devices -->
         <article class="card">
-          <h2>🔒 My Trusted Devices</h2>
-          <p class="hint">Your own verified admin devices.</p>
+          <h2>🔒 Trusted Devices</h2>
+          <p class="hint">Set how many devices can be trusted for your admin account (max 5).</p>
+          <div class="form-grid" style="margin-top:12px">
+            <label>Max Devices</label>
+            <input id="max-devices" type="number" min="1" max="5" value="3" style="max-width:80px" />
+          </div>
+          <div class="button-row" style="margin-top:10px">
+            <button class="accent" onclick="saveMaxDevices()">💾 Save Limit</button>
+          </div>
+          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+          <p style="font-size:13px;font-weight:700;margin-bottom:8px">My Trusted Devices</p>
           <div id="devices-list"><p class="hint">Loading…</p></div>
+          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+          <p style="font-size:13px;font-weight:700;margin-bottom:8px">
+            📱 Pending Staff Device Requests
+            <span id="pending-devices-badge" class="hidden"
+              style="display:inline-block;background:var(--danger);color:#fff;
+                     border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;margin-left:6px">0</span>
+          </p>
+          <div id="pending-devices-list"><p class="hint">Loading…</p></div>
         </article>
 
         <!-- External Integration -->
         <article class="card">
           <h2>🔗 External Integration</h2>
-          <p class="hint">Link a Google Sheet or webhook. Every attendance event will be pushed automatically.</p>
+          <p class="hint">Link a Google Sheet or webhook for automatic attendance push.</p>
           <div class="form-grid">
             <label>Type</label>
             <select id="int-type" onchange="toggleIntFields()">
@@ -668,7 +701,7 @@
             <input id="int-url" type="url" placeholder="https://…" />
           </div>
           <div class="button-row" style="margin-top:12px">
-            <button class="primary" onclick="saveIntegration()">💾 Save</button>
+            <button class="primary"   onclick="saveIntegration()">💾 Save</button>
             <button class="secondary" onclick="removeIntegration()">🗑 Remove</button>
           </div>
           <div id="int-status" class="hint" style="margin-top:8px"></div>
@@ -677,10 +710,7 @@
       </div>
     </section>
   </main>
-
-  <footer class="app-footer">
-    <p>Your data is encrypted and stored securely.</p>
-  </footer>
+  <footer class="app-footer"><p>Your data is encrypted and stored securely.</p></footer>
 </div>
 
 
@@ -694,8 +724,21 @@
   <button data-action="qr">📱 Generate QR</button>
 </div>
 
-<!-- ══════ OVERLAY ══════ -->
+<!-- ══════ MODAL OVERLAY ══════ -->
 <div id="modal-overlay" class="modal-overlay hidden"></div>
+
+<!-- ══════ SIGN OUT CONFIRM ══════ -->
+<div id="signout-modal" class="modal hidden">
+  <div class="signout-modal-body">
+    <div class="signout-icon">👋</div>
+    <strong>Are you sure you want to sign out?</strong>
+    <p style="margin-top:8px">You will need to sign in again to access your account.</p>
+  </div>
+  <div class="modal-actions" style="justify-content:center;gap:14px">
+    <button class="primary"   onclick="doSignOut()">Continue</button>
+    <button class="secondary" onclick="closeModal()">No, stay</button>
+  </div>
+</div>
 
 <!-- ══════ PIN MODAL ══════ -->
 <div id="pin-modal" class="modal pin-modal hidden">
@@ -705,10 +748,10 @@
   </div>
   <p class="pin-desc">Enter your admin PIN to authorise this action.</p>
   <div class="pin-inputs" id="pin-inputs">
-    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" pattern="\d" />
-    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" pattern="\d" />
-    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" pattern="\d" />
-    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" pattern="\d" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
   </div>
   <p class="pin-error hidden" id="pin-error">Incorrect PIN. Try again.</p>
   <div class="modal-actions">
@@ -717,57 +760,44 @@
   </div>
 </div>
 
-<!-- ══════ FORGOT PASSWORD MODAL ══════ -->
+<!-- ══════ FORGOT PASSWORD ══════ -->
 <div id="forgot-modal" class="modal hidden">
   <div class="modal-header">
     <h3>🔑 Reset Password</h3>
     <button class="modal-close" onclick="closeModal()">×</button>
   </div>
   <div id="forgot-step-1">
-    <p class="hint" style="margin-bottom:12px">Enter your email to receive a 6-digit reset code.</p>
-    <div class="field-group">
-      <label>Email Address</label>
-      <input id="forgot-email" type="email" placeholder="your@email.com" />
-    </div>
-    <div class="modal-actions">
-      <button class="primary" onclick="sendResetCode()">Send Code</button>
-    </div>
+    <p class="hint" style="margin-bottom:14px">Enter your email to receive a 6-digit reset code.</p>
+    <div class="field-group"><label>Email Address</label>
+      <input id="forgot-email" type="email" placeholder="your@email.com" /></div>
+    <div class="modal-actions"><button class="primary" onclick="sendResetCode()">Send Code</button></div>
   </div>
   <div id="forgot-step-2" class="hidden">
-    <p class="hint" style="margin-bottom:12px">Enter the 6-digit code sent to your email.</p>
-    <div class="field-group">
-      <label>Verification Code</label>
-      <input id="forgot-code" type="text" maxlength="6" placeholder="123456" inputmode="numeric" style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center" />
-    </div>
-    <div class="field-group">
-      <label>New Password</label>
+    <p class="hint" style="margin-bottom:14px">Enter the 6-digit code sent to your email.</p>
+    <div class="field-group"><label>Verification Code</label>
+      <input id="forgot-code" type="text" maxlength="6" placeholder="123456" inputmode="numeric"
+             style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center" /></div>
+    <div class="field-group" style="margin-top:12px"><label>New Password</label>
       <div class="input-eye">
         <input id="forgot-new-password" type="password" maxlength="128" placeholder="Min 8 characters" />
         <button type="button" class="eye-btn" onclick="toggleEye('forgot-new-password',this)">👁</button>
-      </div>
-    </div>
-    <div class="modal-actions">
-      <button class="primary" onclick="confirmResetCode()">Reset Password</button>
-    </div>
+      </div></div>
+    <div class="modal-actions"><button class="primary" onclick="confirmResetCode()">Reset Password</button></div>
   </div>
   <p id="forgot-status" class="hint" style="margin-top:10px;text-align:center"></p>
 </div>
 
-<!-- ══════ DEVICE TRUST MODAL ══════ -->
+<!-- ══════ DEVICE TRUST ══════ -->
 <div id="device-modal" class="modal hidden">
-  <div class="modal-header">
-    <h3>🔒 New Device Detected</h3>
-  </div>
-  <p class="hint" style="margin-bottom:16px">
-    This device hasn't been verified before. Would you like to trust this device for 30 days?
-  </p>
+  <div class="modal-header"><h3>🔒 New Device Detected</h3></div>
+  <p class="hint" style="margin-bottom:16px">This device hasn't been verified before. Trust it for 30 days?</p>
   <div class="modal-actions">
     <button class="primary"   onclick="trustThisDevice()">✅ Trust This Device</button>
     <button class="secondary" onclick="closeModal()">Not Now</button>
   </div>
 </div>
 
-<!-- ══════ SCANNER MODAL ══════ -->
+<!-- ══════ SCANNER ══════ -->
 <div id="scanner-modal" class="modal hidden">
   <div class="modal-header">
     <h3 id="scanner-title">QR Scanner</h3>
@@ -777,14 +807,10 @@
        style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <label style="font-size:13px;color:var(--text-muted);font-weight:600">📷 Camera:</label>
     <select id="camera-select" onchange="switchCamera()"
-      style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);
-             background:rgba(255,255,255,0.08);color:var(--text);font-family:inherit;font-size:13px">
-    </select>
+      style="flex:1;padding:8px 12px;border-radius:10px;font-size:13px"></select>
   </div>
   <div id="scanner-container"></div>
-  <div class="modal-actions">
-    <button class="secondary" id="btn-stop-scanner">Stop Scanner</button>
-  </div>
+  <div class="modal-actions"><button class="secondary" id="btn-stop-scanner">Stop Scanner</button></div>
 </div>
 
 <!-- ══════ QR MODAL ══════ -->
@@ -793,17 +819,16 @@
     <h3>Staff QR Code</h3>
     <button class="modal-close" id="btn-close-qr">×</button>
   </div>
-  <div class="qr-preview" id="qr-preview"></div>
+  <div class="qr-preview" id="qr-preview" style="display:flex;justify-content:center;padding:16px 0"></div>
   <div class="modal-actions">
-    <a id="download-qr" download="staff-qr.png"
-       style="text-decoration:none;border-radius:14px;padding:13px 22px;font-weight:700;
-              background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:white;display:inline-block;">
+    <a id="download-qr" download="staff-qr.png" class="primary"
+       style="text-decoration:none;padding:11px 20px;border-radius:14px;font-weight:700;font-size:0.88rem">
       ⬇ Download QR
     </a>
   </div>
 </div>
 
-<!-- ══════ VIEW-ALL MODAL ══════ -->
+<!-- ══════ VIEW ALL ══════ -->
 <div id="viewall-modal" class="modal modal-wide hidden">
   <div class="modal-header">
     <h3>📋 All Attendance Entries</h3>
@@ -811,9 +836,7 @@
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
     <input type="text" id="viewall-search" placeholder="Search by name or ID…"
-           style="flex:1;min-width:180px;padding:8px 14px;border-radius:10px;
-                  border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:var(--text)"
-           oninput="filterViewAll()" />
+           style="flex:1;min-width:180px" oninput="filterViewAll()" />
     <button class="accent" onclick="exportViewAllExcel()">📥 Excel</button>
     <button class="accent" onclick="exportViewAllPDF()">📄 PDF</button>
   </div>
