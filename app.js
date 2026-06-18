@@ -29,7 +29,17 @@ function hideSplash() {
   if (splash) {
     setTimeout(() => {
       splash.style.display = "none";
-      document.getElementById("auth-shell").classList.remove("hidden");
+
+      // After splash, decide what to show
+      if (Auth.isLoggedIn()) {
+        apiFetch("/auth/profile").catch(() => {
+          Auth.clear();
+          showAuthShell();
+          showToast("Session expired, please sign in again.", "error");
+        });
+      } else {
+        showAuthShell();
+      }
     }, 3200);
   }
 }
