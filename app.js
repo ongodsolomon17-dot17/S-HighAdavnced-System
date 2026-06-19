@@ -27,20 +27,31 @@ const Auth = {
 function hideSplash() {
   const splash = document.getElementById("splash-screen");
   if (!splash) return;
-  // Splash CSS fades at 2600ms, remove from DOM at 3000ms
   setTimeout(() => {
     splash.style.display = "none";
-    const authEl = document.getElementById("auth-shell");
-    if (authEl) authEl.style.display = "";
   }, 3000);
 }
-// Only show splash if not already logged in
-if (!Auth.isLoggedIn()) {
-  hideSplash();
-} else {
-  const splash = document.getElementById("splash-screen");
-  if (splash) splash.style.display = "none";
+
+function revealAuthShell() {
+  const el = document.getElementById("auth-shell");
+  if (!el) return;
+  el.classList.remove("hidden");
+  el.style.display = "";
 }
+
+// Handle splash + initial routing
+(function initApp() {
+  const splash = document.getElementById("splash-screen");
+  if (Auth.isLoggedIn()) {
+    // Already logged in — skip splash immediately
+    if (splash) splash.style.display = "none";
+  } else {
+    // Show splash, then reveal auth
+    if (splash) splash.style.display = "";
+    hideSplash();
+    setTimeout(revealAuthShell, 3000);
+  }
+})();
 
 // ===== Sound Engine =========================================================
 const SoundEngine = {
@@ -273,7 +284,9 @@ function switchStaffTab(tab) {
 }
 
 function showAuthShell() {
-  document.getElementById("auth-shell").classList.remove("hidden");
+  const authEl = document.getElementById("auth-shell");
+  authEl.classList.remove("hidden");
+  authEl.style.display = "";
   document.getElementById("app-shell").classList.add("hidden");
   document.getElementById("staff-shell").classList.add("hidden");
   const saved = sessionStorage.getItem("att_branding");
@@ -1506,6 +1519,9 @@ if (Auth.isLoggedIn()) {
 } else {
   const saved = sessionStorage.getItem("att_branding");
   if (saved) applyBranding(saved);
+  // switchTab to ensure login tab is visible
+  switchTab("login");
+  switchAuthMode("admin");
 }
 
 setInterval(()=>fetch(`${API_URL}/ping`).catch(()=>{}), 240000);

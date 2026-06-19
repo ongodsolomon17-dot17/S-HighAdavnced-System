@@ -45,8 +45,9 @@ html, body {
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   background: linear-gradient(160deg, #0b1733 0%, #070e22 100%);
-  animation: splashFadeOut 0.6s ease 2.6s both;
+  animation: splashFadeOut 0.6s ease 2.6s forwards;
 }
+#splash-screen.hidden { display: none !important; }
 @keyframes splashFadeOut {
   to { opacity: 0; pointer-events: none; visibility: hidden; }
 }
@@ -879,3 +880,8 @@ input:checked + .toggle-slider:before { transform: translateX(22px); }
   .app-shell { padding-bottom: 36px; }
   .toast { bottom: 28px; }
 }
+
+/* Shell visibility — use both class and ensure no inline conflict */
+.auth-shell.hidden,
+#app-shell.hidden,
+#staff-shell.hidden { display: none !important; }
