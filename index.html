@@ -17,7 +17,7 @@
 <body>
 
 <!-- ══════ SPLASH SCREEN ══════ -->
-<div id="splash-screen">
+<div id="splash-screen" class="splash-screen">
   <div class="auth-blobs">
     <div class="blob blob-1"></div>
     <div class="blob blob-2"></div>
@@ -36,7 +36,7 @@
 </div>
 
 <!-- ══════ AUTH ══════ -->
-<div id="auth-shell" class="auth-shell hidden">
+<div id="auth-shell" class="auth-shell hidden" style="display:none">
   <div class="auth-blobs">
     <div class="blob blob-1"></div>
     <div class="blob blob-2"></div>
@@ -234,6 +234,7 @@
           <button class="pill"        id="sbtn-weekly"  onclick="loadStaffSummary('weekly')">Weekly</button>
           <button class="pill"        id="sbtn-monthly" onclick="loadStaffSummary('monthly')">Monthly</button>
           <button class="pill"        id="sbtn-annual"  onclick="loadStaffSummary('annual')">Annual</button>
+          <button class="pill"        id="sbtn-annual2" onclick="loadStaffSummary('annual')" style="display:none">Annual</button>
         </div>
       </div>
       <div id="staff-summary-stats" class="summary-card-row"></div>
@@ -353,9 +354,9 @@
         <article class="card">
           <h2>Attendance Actions</h2>
           <!-- Staff Search -->
-          <div class="search-dropdown-wrap" style="margin-bottom:14px">
+          <div class="search-dropdown-wrap" style="margin-bottom:14px;position:relative">
             <input id="staff-search-input" type="text" placeholder="🔍 Search staff by name…"
-                   oninput="searchStaffLive(this.value, 'attendance')" autocomplete="off" />
+                   oninput="debouncedSearch(this.value, 'attendance')" autocomplete="off" />
             <div id="staff-search-results" class="search-results hidden"></div>
             <input id="attendance-staff" type="hidden" />
             <div id="selected-staff-display" style="margin-top:8px;font-size:13px;color:var(--accent);font-weight:600;min-height:20px"></div>
@@ -414,9 +415,9 @@
           <label>From Date</label><input type="date" id="report-from" />
           <label>To Date</label>  <input type="date" id="report-to" />
           <label>Staff</label>
-          <div class="search-dropdown-wrap">
+          <div class="search-dropdown-wrap" style="position:relative">
             <input id="report-search-input" type="text" placeholder="🔍 Search staff or leave blank for all…"
-                   oninput="searchStaffLive(this.value, 'report')" autocomplete="off" />
+                   oninput="debouncedSearch(this.value, 'report')" autocomplete="off" />
             <div id="report-search-results" class="search-results hidden"></div>
             <input id="report-staff-id" type="hidden" />
             <div id="report-staff-display" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600;min-height:18px"></div>

@@ -26,24 +26,21 @@ const Auth = {
 // ===== Splash Screen ========================================================
 function hideSplash() {
   const splash = document.getElementById("splash-screen");
-  if (splash) {
-    setTimeout(() => {
-      splash.style.display = "none";
-
-      // After splash, decide what to show
-      if (Auth.isLoggedIn()) {
-        apiFetch("/auth/profile").catch(() => {
-          Auth.clear();
-          showAuthShell();
-          showToast("Session expired, please sign in again.", "error");
-        });
-      } else {
-        showAuthShell();
-      }
-    }, 3200);
-  }
+  if (!splash) return;
+  // Splash CSS fades at 2600ms, remove from DOM at 3000ms
+  setTimeout(() => {
+    splash.style.display = "none";
+    const authEl = document.getElementById("auth-shell");
+    if (authEl) authEl.style.display = "";
+  }, 3000);
 }
-hideSplash();
+// Only show splash if not already logged in
+if (!Auth.isLoggedIn()) {
+  hideSplash();
+} else {
+  const splash = document.getElementById("splash-screen");
+  if (splash) splash.style.display = "none";
+}
 
 // ===== Sound Engine =========================================================
 const SoundEngine = {
@@ -97,7 +94,9 @@ const SoundEngine = {
   fail(idx = 0)    { this._play("fail",    idx); },
 };
 
-SoundEngine.init();
+// Init AudioContext on first user interaction (browser autoplay policy)
+document.addEventListener("click", () => { if (!SoundEngine.ctx) SoundEngine.init(); }, { once: true });
+document.addEventListener("touchstart", () => { if (!SoundEngine.ctx) SoundEngine.init(); }, { once: true, passive: true });
 
 function testSuccessSound() { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.success(Math.floor(Math.random()*6)); }
 function testFailSound()    { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.fail(Math.floor(Math.random()*6)); }
@@ -142,17 +141,15 @@ async function saveMaxDevices() {
   const max = parseInt(document.getElementById("max-devices").value);
   if (isNaN(max) || max < 1 || max > 5) { showToast("Max devices must be 1–5.", "error"); return; }
   try {
-    const profile = await apiFetch("/auth/profile");
+    // Read current schedule fields from UI directly — no profile fetch needed
+    const checkin_time  = document.getElementById("sched-checkin")?.value  || "09:00";
+    const checkout_time = document.getElementById("sched-checkout")?.value || "17:00";
+    const sound_enabled = document.getElementById("sound-enabled")?.checked ?? true;
+    const clockout_enabled       = document.getElementById("clockout-enabled")?.checked ?? true;
+    const night_clockout_enabled = document.getElementById("night-clockout-enabled")?.checked ?? true;
     await apiFetch("/settings/schedule", {
       method: "PUT",
-      body: JSON.stringify({
-        checkin_time:  profile.checkin_time  || "09:00",
-        checkout_time: profile.checkout_time || "17:00",
-        max_devices:   max,
-        sound_enabled: profile.sound_enabled ?? true,
-        clockout_enabled:       profile.clockout_enabled ?? true,
-        night_clockout_enabled: profile.night_clockout_enabled ?? true,
-      })
+      body: JSON.stringify({ checkin_time, checkout_time, max_devices: max, sound_enabled, clockout_enabled, night_clockout_enabled })
     });
     showToast(`Max devices set to ${max}.`, "success");
   } catch (err) { showToast(err.message, "error"); }
@@ -212,37 +209,19 @@ function showToast(message, type = "success") {
   else if (type === "error") SoundEngine.fail(Math.floor(Math.random()*6));
 }
 
-// ===== API Fetch ==========================
+// ===== API Fetch ============================================================
 async function apiFetch(path, options = {}, requireAuth = true) {
-  const headers = options.headers ? { ...options.headers } : {};
-  headers["Content-Type"] = "application/json";
-
-  // Always attach Authorization if we have a token and requireAuth is true
+  const headers = { "Content-Type": "application/json" };
   if (requireAuth) {
-    if (!Auth.isLoggedIn()) {
-      Auth.clear();
-      showAuthShell();
-      throw new Error("Not logged in");
-    }
+    if (!Auth.isLoggedIn()) { showAuthShell(); return; }
     headers["Authorization"] = `Bearer ${Auth.token}`;
   }
-
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res  = await fetch(`${API_URL}${path}`, { headers, ...options });
   const data = await res.json().catch(() => ({}));
-
-  if (res.status === 401) {
-    Auth.clear();
-    showAuthShell();
-    throw new Error("Session expired.");
-  }
-
-  if (!res.ok) {
-    throw new Error(data.error || `Request failed (${res.status})`);
-  }
-
+  if (res.status === 401) { Auth.clear(); showAuthShell(); throw new Error("Session expired."); }
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
-
 
 // ===== Branding =============================================================
 function applyBranding(pictureUrl) {
@@ -341,6 +320,12 @@ function doSignOut() {
 
 // ===== Staff Search =========================================================
 let _allStaffCache = [];
+let _searchDebounceTimer = null;
+
+function debouncedSearch(query, context) {
+  clearTimeout(_searchDebounceTimer);
+  _searchDebounceTimer = setTimeout(() => searchStaffLive(query, context), 250);
+}
 
 async function ensureStaffCache() {
   if (!_allStaffCache.length) { try { _allStaffCache = await listStaff(); } catch (_) {} }
@@ -440,10 +425,12 @@ function switchDashPeriod(period) {
 // ===== Shift selection ======================================================
 let selectedShift = "day";
 function applyScheduleDisplay() {
-  const sched = JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
+  const raw = sessionStorage.getItem("att_schedule");
+  if (!raw) return; // Not loaded yet — called again after staff login
+  const sched = JSON.parse(raw);
   const el    = document.getElementById("staff-schedule-display");
   if (el && sched.checkin_time) {
-    el.textContent = `⏰ ${sched.checkin_time}–${sched.checkout_time}`;
+    el.textContent = `⏰ Check-in: ${sched.checkin_time}  Check-out: ${sched.checkout_time}`;
   }
   if (sched.night_checkin_time) {
     document.getElementById("shift-selector")?.classList.remove("hidden");
@@ -505,8 +492,10 @@ async function handleRegister() {
     const res = await apiFetch("/auth/register", { method: "POST", body: JSON.stringify({ company, email, phone, password, pin }) }, false);
     Auth.set(res.token, res.company, "admin");
     await checkDeviceTrust();
-    showAppShell();
-    showToast(`Welcome, ${res.company}!`, "success");
+    if (Auth.isLoggedIn()) {
+      showAppShell();
+      showToast(`Welcome, ${res.company}!`, "success");
+    }
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -521,17 +510,19 @@ async function handleLogin() {
   btn.disabled = true; sp.classList.remove("hidden");
   try {
     const fp  = getDeviceFingerprint();
-    const res = await fetch(`${API_URL}/auth/login`, {
+    const loginRes  = await fetch(`${API_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Device-FP": fp },
       body: JSON.stringify({ email, password })
     });
-    const resData = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(resData.error || `Login failed (${res.status})`);
+    const resData = await loginRes.json().catch(() => ({}));
+    if (!loginRes.ok) throw new Error(resData.error || `Login failed (${loginRes.status})`);
     Auth.set(resData.token, resData.company, "admin");
     await checkDeviceTrust();
-    showAppShell();
-    showToast(`Welcome back, ${resData.company}!`, "success");
+    if (Auth.isLoggedIn()) {
+      showAppShell();
+      showToast(`Welcome back, ${resData.company}!`, "success");
+    }
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -546,19 +537,21 @@ async function handleStaffLogin() {
   btn.disabled = true; sp.classList.remove("hidden");
   try {
     const fp2 = getDeviceFingerprint();
-    const res = await fetch(`${API_URL}/auth/staff-login`, {
+    const staffRes = await fetch(`${API_URL}/auth/staff-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Device-FP": fp2 },
       body: JSON.stringify({ email, password })
     });
-    const resData2 = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(resData2.error || `Login failed (${res.status})`);
+    const resData2 = await staffRes.json().catch(() => ({}));
+    if (!staffRes.ok) throw new Error(resData2.error || `Login failed (${staffRes.status})`);
     Auth.set(resData2.token, resData2.company, "staff", resData2.staff_id, resData2.name);
     if (resData2.geofence) sessionStorage.setItem("att_geofence", JSON.stringify(resData2.geofence));
     if (resData2.schedule) sessionStorage.setItem("att_schedule", JSON.stringify(resData2.schedule));
     await checkDeviceTrust();
-    showStaffShell();
-    showToast(`Welcome, ${resData2.name}!`, "success");
+    if (Auth.isLoggedIn()) {
+      showStaffShell();
+      showToast(`Welcome, ${resData2.name}!`, "success");
+    }
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -1048,10 +1041,8 @@ async function listAttendance() { return apiFetch("/attendance"); }
 
 // ===== Rendering ============================================================
 async function renderStaffOptions() {
-  await ensureStaffCache();
-  const current = document.getElementById("attendance-staff").value;
-  // Search-based selection — no need to populate dropdown
-  if (current) document.getElementById("selected-staff-display").textContent = `✅ Selected: ${current}`;
+  // Refresh staff cache for search
+  try { _allStaffCache = await listStaff(); } catch (_) {}
 }
 
 async function renderStaffTable() {

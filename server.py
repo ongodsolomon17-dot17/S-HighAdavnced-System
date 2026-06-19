@@ -123,7 +123,7 @@ def haversine_m(lat1, lng1, lat2, lng2):
 # Allowed characters for email (RFC 5321 simplified)
 _EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 # Null byte / control character pattern
-_BAD_CHARS_RE = re.compile(r'[--]')
+_BAD_CHARS_RE = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 def clean_string(value: str, max_len: int, field: str) -> str:
     """Strip dangerous characters and enforce length."""
@@ -152,14 +152,6 @@ def get_device_fp() -> str:
 # ===== Progressive Lockout ===================================================
 # Escalation schedule: hours locked per level
 _LOCKOUT_HOURS = [12, 24, 24, 24 * 30]   # level 0→1→2→3→4
-
-def _get_lockout_record(conn, identifier: str, device_fp: str):
-    c = conn.cursor()
-    c.execute(
-        "SELECT * FROM login_attempts WHERE identifier=%s AND device_fp=%s",
-        (identifier, device_fp)
-    )
-    return c.fetchone()
 
 def check_login_lockout(identifier: str, device_fp: str):
     """Abort 429 if this identifier+device is currently locked out."""
@@ -211,9 +203,9 @@ def record_failed_login(identifier: str, device_fp: str):
         new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
         c.execute(
             """UPDATE login_attempts
-               SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s
+               SET attempt_count=0, locked_until=%s, escalation=%s, last_attempt=%s
                WHERE id=%s""",
-            (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
+            (locked_until, new_escalation, now.isoformat(), rec["id"])
         )
     else:
         c.execute(
@@ -272,8 +264,8 @@ def record_failed_pin(user_id: int):
         locked_until = (now + timedelta(hours=hours)).isoformat()
         new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
         c.execute(
-            "UPDATE pin_attempts SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s WHERE id=%s",
-            (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
+            "UPDATE pin_attempts SET attempt_count=0, locked_until=%s, escalation=%s, last_attempt=%s WHERE id=%s",
+            (locked_until, new_escalation, now.isoformat(), rec["id"])
         )
     else:
         c.execute(
@@ -736,8 +728,13 @@ def staff_login():
             "enabled": acc["geofence_enabled"]
         },
         "schedule": {
-            "checkin_time":  acc["checkin_time"]  or "09:00",
-            "checkout_time": acc["checkout_time"] or "17:00"
+            "checkin_time":          acc["checkin_time"]          or "09:00",
+            "checkout_time":         acc["checkout_time"]         or "17:00",
+            "night_checkin_time":    acc.get("night_checkin_time"),
+            "night_checkout_time":   acc.get("night_checkout_time"),
+            "clockout_enabled":      acc.get("clockout_enabled", True),
+            "night_clockout_enabled":acc.get("night_clockout_enabled", True),
+            "sound_enabled":         acc.get("sound_enabled", True)
         }
     })
 
@@ -745,10 +742,10 @@ def staff_login():
 @app.route("/auth/staff-register", methods=["POST"])
 def staff_register():
     data       = require_json()
-    email      = sanitize(data.get("email"),         MAX_EMAIL_LEN,    "email")
-    password   = sanitize(data.get("password"),      MAX_PASSWORD_LEN, "password")
+    email      = validate_email_format(data.get("email", ""))
+    password   = clean_string(data.get("password", ""), MAX_PASSWORD_LEN, "password")
     staff_id   = validate_staff_id(data.get("staff_id"))
-    comp_email = sanitize(data.get("company_email"), MAX_EMAIL_LEN,    "company_email")
+    comp_email = validate_email_format(data.get("company_email", ""))
 
     if not email or not password or not comp_email:
         abort(400, description="email, password and company_email are required.")
@@ -822,7 +819,7 @@ def get_profile():
     current = get_current_user()
     conn    = get_db()
     c       = conn.cursor()
-    c.execute("""SELECT id, company, email, phone, created_at,
+    c.execute("""SELECT id, company, email, phone, created_at, profile_picture,
                         geofence_lat, geofence_lng, geofence_radius, geofence_enabled,
                         checkin_time, checkout_time, night_checkin_time, night_checkout_time,
                         clockout_enabled, night_clockout_enabled, sound_enabled, max_devices
@@ -841,9 +838,10 @@ def update_profile():
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
     data    = require_json()
-    email   = sanitize(data.get("email"),   MAX_EMAIL_LEN,    "email")
-    phone   = sanitize(data.get("phone"),   MAX_PHONE_LEN,    "phone")
-    company = sanitize(data.get("company"), MAX_COMPANY_LEN,  "company")
+    raw_email = data.get("email")
+    email   = validate_email_format(raw_email) if raw_email else None
+    phone   = clean_string(data.get("phone"),   MAX_PHONE_LEN,   "phone")
+    company = clean_string(data.get("company"), MAX_COMPANY_LEN, "company")
 
     conn = get_db()
     try:
@@ -905,6 +903,8 @@ def forgot_password():
     data  = require_json()
     email = sanitize(data.get("email"), MAX_EMAIL_LEN, "email")
     role  = data.get("role", "admin")
+    if role not in ("admin", "staff"):
+        abort(400, description="Invalid role.")
     if not email:
         abort(400, description="'email' is required.")
 
@@ -1029,10 +1029,14 @@ def set_schedule():
     time_re = re.compile(r'^\d{2}:\d{2}$')
     if not time_re.match(checkin_time) or not time_re.match(checkout_time):
         abort(400, description="Times must be in HH:MM format.")
+    night_checkin  = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
+    night_checkout = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
+    if night_checkin and not time_re.match(night_checkin):
+        abort(400, description="night_checkin_time must be HH:MM format.")
+    if night_checkout and not time_re.match(night_checkout):
+        abort(400, description="night_checkout_time must be HH:MM format.")
     conn = get_db()
     c    = conn.cursor()
-    night_checkin           = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
-    night_checkout          = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
     clockout_enabled        = bool(data.get("clockout_enabled", True))
     night_clockout_enabled  = bool(data.get("night_clockout_enabled", True))
     sound_enabled           = bool(data.get("sound_enabled", True))
@@ -1192,6 +1196,16 @@ def record_attendance():
     action = sanitize(data.get("action"), 20, "action")
     lat    = data.get("lat")
     lng    = data.get("lng")
+    if lat is not None:
+        try:
+            lat = float(lat)
+            if not (-90 <= lat <= 90): abort(400, description="Invalid latitude.")
+        except (ValueError, TypeError): abort(400, description="lat must be a number.")
+    if lng is not None:
+        try:
+            lng = float(lng)
+            if not (-180 <= lng <= 180): abort(400, description="Invalid longitude.")
+        except (ValueError, TypeError): abort(400, description="lng must be a number.")
 
     if action not in VALID_ACTIONS:
         abort(400, description=f"'action' must be one of: {', '.join(VALID_ACTIONS)}.")
@@ -1221,8 +1235,8 @@ def record_attendance():
         c.execute(
             "INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng) VALUES (%s,%s,%s,%s,%s,%s)",
             (current["sub"], staff_id, action, timestamp,
-             float(lat) if lat is not None else None,
-             float(lng) if lng is not None else None)
+             lat,
+             lng)
         )
         conn.commit()
     finally:
@@ -1291,26 +1305,26 @@ def attendance_summary():
     for sid, events in events_by_staff.items():
         total_seconds = 0
         days_present  = set()
-        check_in_time = None
-        sessions      = []
+        last_checkin_ts = None
+        sessions        = []
         lateness_grades = []
 
         for ev in events:
             ts = datetime.fromisoformat(ev["timestamp"])
             if ev["action"] == "check_in":
-                check_in_time = ts
+                last_checkin_ts = ts
                 days_present.add(ts.date().isoformat())
                 grade_label, mins_late = compute_lateness_grade(ts, checkin_time)
                 lateness_grades.append({"date": ts.date().isoformat(), "grade": grade_label, "minutes_late": mins_late})
-            elif ev["action"] == "check_out" and check_in_time:
-                dur = (ts - check_in_time).total_seconds()
+            elif ev["action"] == "check_out" and last_checkin_ts:
+                dur = (ts - last_checkin_ts).total_seconds()
                 total_seconds += dur
                 sessions.append({
-                    "in":    check_in_time.isoformat(),
+                    "in":    last_checkin_ts.isoformat(),
                     "out":   ts.isoformat(),
                     "hours": round(dur / 3600, 2)
                 })
-                check_in_time = None
+                last_checkin_ts = None
 
         total_hours = round(total_seconds / 3600, 2)
 
@@ -1334,8 +1348,8 @@ def attendance_summary():
             "grade":          overall,
             "lateness_log":   lateness_grades,
             "sessions":       sessions,
-            "checkin_time":   checkin_time,
-            "checkout_time":  checkout_time
+            "expected_checkin":  checkin_time,
+            "expected_checkout": checkout_time
         })
 
     # Add absent staff (only for daily period)
@@ -1427,12 +1441,18 @@ def analytics():
     """, (current["sub"], today + "%", today + "%"))
     still_in = [dict(r) for r in c.fetchall()]
 
+    trend_start = (now - timedelta(days=13)).date().isoformat()
+    c.execute("""
+        SELECT CAST(timestamp AS DATE) as day, COUNT(*) as n
+        FROM attendance
+        WHERE user_id=%s AND action='check_in' AND timestamp >= %s
+        GROUP BY CAST(timestamp AS DATE)
+    """, (current["sub"], trend_start))
+    trend_map = {str(r["day"]): r["n"] for r in c.fetchall()}
     trend = []
     for i in range(13, -1, -1):
         d = (now - timedelta(days=i)).date().isoformat()
-        c.execute("SELECT COUNT(*) AS n FROM attendance WHERE user_id=%s AND action='check_in' AND timestamp LIKE %s",
-                  (current["sub"], d + "%"))
-        trend.append({"date": d, "checkins": c.fetchone()["n"]})
+        trend.append({"date": d, "checkins": trend_map.get(d, 0)})
 
     conn.close()
 
