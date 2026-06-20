@@ -26,32 +26,24 @@ const Auth = {
 // ===== Splash Screen ========================================================
 function hideSplash() {
   const splash = document.getElementById("splash-screen");
-  if (!splash) return;
-  setTimeout(() => {
-    splash.style.display = "none";
-  }, 3000);
-}
+  if (splash) {
+    setTimeout(() => {
+      splash.style.display = "none";
 
-function revealAuthShell() {
-  const el = document.getElementById("auth-shell");
-  if (!el) return;
-  el.classList.remove("hidden");
-  el.style.display = "";
-}
-
-// Handle splash + initial routing
-(function initApp() {
-  const splash = document.getElementById("splash-screen");
-  if (Auth.isLoggedIn()) {
-    // Already logged in — skip splash immediately
-    if (splash) splash.style.display = "none";
-  } else {
-    // Show splash, then reveal auth
-    if (splash) splash.style.display = "";
-    hideSplash();
-    setTimeout(revealAuthShell, 3000);
+      // After splash, decide what to show
+      if (Auth.isLoggedIn()) {
+        apiFetch("/auth/profile").catch(() => {
+          Auth.clear();
+          showAuthShell();
+          showToast("Session expired, please sign in again.", "error");
+        });
+      } else {
+        showAuthShell();
+      }
+    }, 3200);
   }
-})();
+}
+hideSplash();
 
 // ===== Sound Engine =========================================================
 const SoundEngine = {
@@ -105,9 +97,7 @@ const SoundEngine = {
   fail(idx = 0)    { this._play("fail",    idx); },
 };
 
-// Init AudioContext on first user interaction (browser autoplay policy)
-document.addEventListener("click", () => { if (!SoundEngine.ctx) SoundEngine.init(); }, { once: true });
-document.addEventListener("touchstart", () => { if (!SoundEngine.ctx) SoundEngine.init(); }, { once: true, passive: true });
+SoundEngine.init();
 
 function testSuccessSound() { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.success(Math.floor(Math.random()*6)); }
 function testFailSound()    { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.fail(Math.floor(Math.random()*6)); }
@@ -152,15 +142,17 @@ async function saveMaxDevices() {
   const max = parseInt(document.getElementById("max-devices").value);
   if (isNaN(max) || max < 1 || max > 5) { showToast("Max devices must be 1–5.", "error"); return; }
   try {
-    // Read current schedule fields from UI directly — no profile fetch needed
-    const checkin_time  = document.getElementById("sched-checkin")?.value  || "09:00";
-    const checkout_time = document.getElementById("sched-checkout")?.value || "17:00";
-    const sound_enabled = document.getElementById("sound-enabled")?.checked ?? true;
-    const clockout_enabled       = document.getElementById("clockout-enabled")?.checked ?? true;
-    const night_clockout_enabled = document.getElementById("night-clockout-enabled")?.checked ?? true;
+    const profile = await apiFetch("/auth/profile");
     await apiFetch("/settings/schedule", {
       method: "PUT",
-      body: JSON.stringify({ checkin_time, checkout_time, max_devices: max, sound_enabled, clockout_enabled, night_clockout_enabled })
+      body: JSON.stringify({
+        checkin_time:  profile.checkin_time  || "09:00",
+        checkout_time: profile.checkout_time || "17:00",
+        max_devices:   max,
+        sound_enabled: profile.sound_enabled ?? true,
+        clockout_enabled:       profile.clockout_enabled ?? true,
+        night_clockout_enabled: profile.night_clockout_enabled ?? true,
+      })
     });
     showToast(`Max devices set to ${max}.`, "success");
   } catch (err) { showToast(err.message, "error"); }
@@ -220,19 +212,37 @@ function showToast(message, type = "success") {
   else if (type === "error") SoundEngine.fail(Math.floor(Math.random()*6));
 }
 
-// ===== API Fetch ============================================================
+// ===== API Fetch ==========================
 async function apiFetch(path, options = {}, requireAuth = true) {
-  const headers = { "Content-Type": "application/json" };
+  const headers = options.headers ? { ...options.headers } : {};
+  headers["Content-Type"] = "application/json";
+
+  // Always attach Authorization if we have a token and requireAuth is true
   if (requireAuth) {
-    if (!Auth.isLoggedIn()) { showAuthShell(); return; }
+    if (!Auth.isLoggedIn()) {
+      Auth.clear();
+      showAuthShell();
+      throw new Error("Not logged in");
+    }
     headers["Authorization"] = `Bearer ${Auth.token}`;
   }
-  const res  = await fetch(`${API_URL}${path}`, { headers, ...options });
+
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { Auth.clear(); showAuthShell(); throw new Error("Session expired."); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+
+  if (res.status === 401) {
+    Auth.clear();
+    showAuthShell();
+    throw new Error("Session expired.");
+  }
+
+  if (!res.ok) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+
   return data;
 }
+
 
 // ===== Branding =============================================================
 function applyBranding(pictureUrl) {
@@ -284,9 +294,7 @@ function switchStaffTab(tab) {
 }
 
 function showAuthShell() {
-  const authEl = document.getElementById("auth-shell");
-  authEl.classList.remove("hidden");
-  authEl.style.display = "";
+  document.getElementById("auth-shell").classList.remove("hidden");
   document.getElementById("app-shell").classList.add("hidden");
   document.getElementById("staff-shell").classList.add("hidden");
   const saved = sessionStorage.getItem("att_branding");
@@ -333,12 +341,6 @@ function doSignOut() {
 
 // ===== Staff Search =========================================================
 let _allStaffCache = [];
-let _searchDebounceTimer = null;
-
-function debouncedSearch(query, context) {
-  clearTimeout(_searchDebounceTimer);
-  _searchDebounceTimer = setTimeout(() => searchStaffLive(query, context), 250);
-}
 
 async function ensureStaffCache() {
   if (!_allStaffCache.length) { try { _allStaffCache = await listStaff(); } catch (_) {} }
@@ -367,13 +369,26 @@ function searchStaffLive(query, context) {
   if (!matches.length) { results.innerHTML = '<div class="search-result-item" style="color:var(--text-muted)">No staff found</div>'; results.classList.remove("hidden"); return; }
 
   results.innerHTML = matches.map(s => `
-    <div class="search-result-item" onclick="selectSearchStaff('${esc(s.id)}','${esc(s.name)}','${context}')">
+    <div class="search-result-item" data-staff-id="${esc(s.id)}" data-staff-name="${esc(s.name)}" data-context="${esc(context)}">
       <span>${esc(s.name)}</span>
       <span class="staff-id-chip">${esc(s.id)}</span>
     </div>
   `).join("");
   results.classList.remove("hidden");
 }
+
+// Event delegation for search result clicks — avoids embedding raw staff
+// names inside an inline onclick string, which (even HTML-escaped) is
+// unsafe: a name containing something like '); alert(1); // can break out
+// of the JS string literal once the browser HTML-decodes the attribute.
+["staff-search-results","report-search-results"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("click", e => {
+    const item = e.target.closest("[data-staff-id]");
+    if (!item) return;
+    selectSearchStaff(item.dataset.staffId, item.dataset.staffName, item.dataset.context);
+  });
+});
 
 function selectSearchStaff(id, name, context) {
   const resultsId = context === "attendance" ? "staff-search-results"  : "report-search-results";
@@ -438,12 +453,10 @@ function switchDashPeriod(period) {
 // ===== Shift selection ======================================================
 let selectedShift = "day";
 function applyScheduleDisplay() {
-  const raw = sessionStorage.getItem("att_schedule");
-  if (!raw) return; // Not loaded yet — called again after staff login
-  const sched = JSON.parse(raw);
+  const sched = JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
   const el    = document.getElementById("staff-schedule-display");
   if (el && sched.checkin_time) {
-    el.textContent = `⏰ Check-in: ${sched.checkin_time}  Check-out: ${sched.checkout_time}`;
+    el.textContent = `⏰ ${sched.checkin_time}–${sched.checkout_time}`;
   }
   if (sched.night_checkin_time) {
     document.getElementById("shift-selector")?.classList.remove("hidden");
@@ -505,10 +518,8 @@ async function handleRegister() {
     const res = await apiFetch("/auth/register", { method: "POST", body: JSON.stringify({ company, email, phone, password, pin }) }, false);
     Auth.set(res.token, res.company, "admin");
     await checkDeviceTrust();
-    if (Auth.isLoggedIn()) {
-      showAppShell();
-      showToast(`Welcome, ${res.company}!`, "success");
-    }
+    showAppShell();
+    showToast(`Welcome, ${res.company}!`, "success");
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -523,19 +534,17 @@ async function handleLogin() {
   btn.disabled = true; sp.classList.remove("hidden");
   try {
     const fp  = getDeviceFingerprint();
-    const loginRes  = await fetch(`${API_URL}/auth/login`, {
+    const res = await fetch(`${API_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Device-FP": fp },
       body: JSON.stringify({ email, password })
     });
-    const resData = await loginRes.json().catch(() => ({}));
-    if (!loginRes.ok) throw new Error(resData.error || `Login failed (${loginRes.status})`);
+    const resData = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(resData.error || `Login failed (${res.status})`);
     Auth.set(resData.token, resData.company, "admin");
     await checkDeviceTrust();
-    if (Auth.isLoggedIn()) {
-      showAppShell();
-      showToast(`Welcome back, ${resData.company}!`, "success");
-    }
+    showAppShell();
+    showToast(`Welcome back, ${resData.company}!`, "success");
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -550,21 +559,19 @@ async function handleStaffLogin() {
   btn.disabled = true; sp.classList.remove("hidden");
   try {
     const fp2 = getDeviceFingerprint();
-    const staffRes = await fetch(`${API_URL}/auth/staff-login`, {
+    const res = await fetch(`${API_URL}/auth/staff-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Device-FP": fp2 },
       body: JSON.stringify({ email, password })
     });
-    const resData2 = await staffRes.json().catch(() => ({}));
-    if (!staffRes.ok) throw new Error(resData2.error || `Login failed (${staffRes.status})`);
+    const resData2 = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(resData2.error || `Login failed (${res.status})`);
     Auth.set(resData2.token, resData2.company, "staff", resData2.staff_id, resData2.name);
     if (resData2.geofence) sessionStorage.setItem("att_geofence", JSON.stringify(resData2.geofence));
     if (resData2.schedule) sessionStorage.setItem("att_schedule", JSON.stringify(resData2.schedule));
     await checkDeviceTrust();
-    if (Auth.isLoggedIn()) {
-      showStaffShell();
-      showToast(`Welcome, ${resData2.name}!`, "success");
-    }
+    showStaffShell();
+    showToast(`Welcome, ${resData2.name}!`, "success");
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -600,11 +607,11 @@ async function checkDeviceTrust() {
     }
     if (res.status === "pending") {
       Auth.clear(); showAuthShell();
-      showAuthMessage("⏳ Device approval pending. Ask your admin to approve.", "error"); return;
+      showAuthMessage(res.reason ? `⏳ ${res.reason}` : "⏳ Device approval pending. Ask your admin to approve.", "error"); return;
     }
     if (res.status === "rejected") {
       Auth.clear(); showAuthShell();
-      showAuthMessage("🚫 Access denied. Device rejected by admin.", "error"); return;
+      showAuthMessage(res.reason ? `🚫 ${res.reason}` : "🚫 Access denied. Device rejected by admin.", "error"); return;
     }
     if (res.status === "unknown" && Auth.role === "admin") { _pendingDeviceTrust = true; openModal("device-modal"); return; }
     if (res.first_bind) showToast("✅ Device registered as your primary device.", "success");
@@ -709,7 +716,7 @@ async function confirmPin() {
   btn.disabled = true;
   try {
     await apiFetch("/auth/verify-pin", { method: "POST", body: JSON.stringify({ pin }) });
-    closeModal(); if (pinResolve) pinResolve(true);
+    closeModal(); if (pinResolve) pinResolve(pin);
   } catch (_) {
     document.getElementById("pin-error").classList.remove("hidden");
     document.querySelectorAll(".pin-box").forEach(b => b.value = "");
@@ -722,7 +729,7 @@ document.getElementById("btn-close-pin").addEventListener("click",  () => { clos
 document.getElementById("btn-close-pin2").addEventListener("click", () => { closeModal(); if (pinReject) pinReject(new Error("PIN cancelled")); });
 
 async function withPin(action) {
-  try { await requestPin(); await action(); }
+  try { const pin = await requestPin(); await action(pin); }
   catch (err) { if (err.message !== "PIN cancelled") showToast(err.message, "error"); }
 }
 
@@ -862,8 +869,10 @@ async function removeProfilePic() {
 }
 
 // ===== Profile Edit =========================================================
+let _profileEditPin = null;
 async function unlockProfileEdit() {
-  await withPin(async () => {
+  await withPin(async (pin) => {
+    _profileEditPin = pin;
     const profile = await apiFetch("/auth/profile");
     document.getElementById("edit-company").value = profile.company || "";
     document.getElementById("edit-email").value   = profile.email   || "";
@@ -872,12 +881,18 @@ async function unlockProfileEdit() {
     document.getElementById("profile-edit-form").classList.remove("hidden");
   });
 }
+function lockProfileEdit() {
+  _profileEditPin = null;
+  document.getElementById("profile-edit-form").classList.add("hidden");
+  document.getElementById("profile-edit-locked").classList.remove("hidden");
+}
 async function saveProfileEdit() {
   const company = document.getElementById("edit-company").value.trim();
   const email   = document.getElementById("edit-email").value.trim();
   const phone   = document.getElementById("edit-phone").value.trim();
+  if (!_profileEditPin) { showToast("Session expired — please unlock again.", "error"); lockProfileEdit(); return; }
   try {
-    await apiFetch("/auth/update-profile", { method: "PUT", body: JSON.stringify({ company, email, phone }) });
+    await apiFetch("/auth/update-profile", { method: "PUT", body: JSON.stringify({ company, email, phone, pin: _profileEditPin }) });
     if (company) { sessionStorage.setItem("att_company", company); document.getElementById("company-name-display").textContent = company; }
     document.getElementById("profile-edit-status").textContent = "✅ Profile updated!";
     showToast("Profile updated!", "success");
@@ -886,14 +901,22 @@ async function saveProfileEdit() {
 async function savePasswordPin() {
   const newPassword = document.getElementById("edit-new-password").value;
   const newPin      = document.getElementById("edit-new-pin").value.trim();
+  if (!_profileEditPin) { showToast("Session expired — please unlock again.", "error"); lockProfileEdit(); return; }
   if (newPassword) {
     if (newPassword.length < 8) { showToast("Password must be at least 8 characters.", "error"); return; }
-    try { await apiFetch("/auth/change-password", { method: "PUT", body: JSON.stringify({ new_password: newPassword }) }); document.getElementById("edit-new-password").value = ""; showToast("Password updated!", "success"); }
+    try { await apiFetch("/auth/change-password", { method: "PUT", body: JSON.stringify({ new_password: newPassword, pin: _profileEditPin }) }); document.getElementById("edit-new-password").value = ""; showToast("Password updated!", "success"); }
     catch (err) { showToast(err.message, "error"); return; }
   }
   if (newPin) {
     if (!/^\d{4,8}$/.test(newPin)) { showToast("PIN must be 4–8 digits.", "error"); return; }
-    try { await apiFetch("/auth/change-pin", { method: "PUT", body: JSON.stringify({ new_pin: newPin }) }); document.getElementById("edit-new-pin").value = ""; showToast("PIN updated!", "success"); }
+    try {
+      await apiFetch("/auth/change-pin", { method: "PUT", body: JSON.stringify({ new_pin: newPin, pin: _profileEditPin }) });
+      document.getElementById("edit-new-pin").value = "";
+      showToast("PIN updated!", "success");
+      // The PIN just changed — the previously-verified PIN is now stale.
+      // Re-lock so any further sensitive change re-verifies the new PIN.
+      lockProfileEdit();
+    }
     catch (err) { showToast(err.message, "error"); }
   }
 }
@@ -1054,8 +1077,10 @@ async function listAttendance() { return apiFetch("/attendance"); }
 
 // ===== Rendering ============================================================
 async function renderStaffOptions() {
-  // Refresh staff cache for search
-  try { _allStaffCache = await listStaff(); } catch (_) {}
+  await ensureStaffCache();
+  const current = document.getElementById("attendance-staff").value;
+  // Search-based selection — no need to populate dropdown
+  if (current) document.getElementById("selected-staff-display").textContent = `✅ Selected: ${current}`;
 }
 
 async function renderStaffTable() {
@@ -1156,9 +1181,9 @@ async function loadAnalytics() {
     document.getElementById("ai-still-in").textContent = data.still_clocked_in.length;
     const avgH = data.avg_checkin_hour;
     document.getElementById("ai-avg-hr").textContent = avgH!=null ? `${Math.floor(avgH)}:${String(Math.round((avgH%1)*60)).padStart(2,"0")}` : "—";
-    document.getElementById("top-performers").innerHTML = data.top_performers.length ? data.top_performers.map(p => `<li>🏅 ${p.name||p.staff_id} — ${p.sessions} sessions</li>`).join("") : "<li>No data yet</li>";
-    document.getElementById("low-attendance").innerHTML = data.low_attendance.length  ? data.low_attendance.map(p  => `<li>⚠️ ${p.name||p.staff_id} — ${p.sessions} sessions</li>`).join("") : "<li>All attending regularly 🎉</li>";
-    document.getElementById("still-clocked").innerHTML  = data.still_clocked_in.length ? data.still_clocked_in.map(p => `<li>🟢 ${p.name||p.staff_id}</li>`).join("") : "<li>Nobody clocked in</li>";
+    document.getElementById("top-performers").innerHTML = data.top_performers.length ? data.top_performers.map(p => `<li>🏅 ${esc(p.name||p.staff_id)} — ${p.sessions} sessions</li>`).join("") : "<li>No data yet</li>";
+    document.getElementById("low-attendance").innerHTML = data.low_attendance.length  ? data.low_attendance.map(p  => `<li>⚠️ ${esc(p.name||p.staff_id)} — ${p.sessions} sessions</li>`).join("") : "<li>All attending regularly 🎉</li>";
+    document.getElementById("still-clocked").innerHTML  = data.still_clocked_in.length ? data.still_clocked_in.map(p => `<li>🟢 ${esc(p.name||p.staff_id)}</li>`).join("") : "<li>Nobody clocked in</li>";
     const fLabels = data.attendance_frequency.map(p => p.name||p.staff_id);
     const fValues = data.attendance_frequency.map(p => p.sessions);
     const ctx2    = document.getElementById("freq-chart").getContext("2d");
@@ -1344,6 +1369,19 @@ async function loadStaffSummary(period) {
 
 // ===== QR Scanner ===========================================================
 let html5Scanner = null, scanType = null, availableCams = [];
+let _scannerStarting = null; // in-flight start() promise, so we never call
+                              // stop() before start() has actually settled
+
+async function stopScanner() {
+  if (_scannerStarting) {
+    try { await _scannerStarting; } catch (_) {}
+  }
+  if (html5Scanner) {
+    try { await html5Scanner.stop(); } catch (_) {}
+    html5Scanner = null;
+  }
+}
+
 async function startScan(type) {
   scanType = type;
   document.getElementById("scanner-title").textContent = type==="check_in" ? "📷 Scan QR – Check In" : "📷 Scan QR – Check Out";
@@ -1362,19 +1400,27 @@ async function startScan(type) {
   launchScanner();
 }
 async function launchScanner() {
-  if (html5Scanner) { await html5Scanner.stop().catch(()=>null); html5Scanner = null; }
+  await stopScanner();
   document.getElementById("scanner-container").innerHTML = '<div id="qr-reader" style="width:100%"></div>';
   html5Scanner = new Html5Qrcode("qr-reader");
   const camSel   = document.getElementById("camera-select");
   const cameraId = camSel?.value ? { deviceId: { exact: camSel.value } } : { facingMode: "environment" };
-  html5Scanner.start(cameraId, { fps: 10, qrbox: { width:250, height:250 } }, async decodedText => {
+  _scannerStarting = html5Scanner.start(cameraId, { fps: 10, qrbox: { width:250, height:250 } }, async decodedText => {
     const staffId = sanitize(decodedText, 20);
     closeModal();
     let lat = null, lng = null;
     if (adminGeoPos) { lat = adminGeoPos.coords.latitude; lng = adminGeoPos.coords.longitude; }
     try { await withPin(async () => { await recordAttendance(scanType, staffId, lat, lng); }); }
     catch (err) { showToast(err.message, "error"); }
-  }).catch(() => { showToast("Unable to start camera.", "error"); closeModal(); });
+  });
+  try {
+    await _scannerStarting;
+  } catch (_) {
+    showToast("Unable to start camera.", "error");
+    closeModal();
+  } finally {
+    _scannerStarting = null;
+  }
 }
 async function switchCamera() { await launchScanner(); }
 
@@ -1397,7 +1443,7 @@ function showQrForStaff(staffId) {
 function closeModal() {
   document.getElementById("modal-overlay").classList.add("hidden");
   document.querySelectorAll(".modal").forEach(m => m.classList.add("hidden"));
-  if (html5Scanner) { html5Scanner.stop().catch(()=>null); html5Scanner = null; }
+  stopScanner();
 }
 function openModal(id) {
   document.getElementById("modal-overlay").classList.remove("hidden");
@@ -1519,9 +1565,6 @@ if (Auth.isLoggedIn()) {
 } else {
   const saved = sessionStorage.getItem("att_branding");
   if (saved) applyBranding(saved);
-  // switchTab to ensure login tab is visible
-  switchTab("login");
-  switchAuthMode("admin");
 }
 
 setInterval(()=>fetch(`${API_URL}/ping`).catch(()=>{}), 240000);

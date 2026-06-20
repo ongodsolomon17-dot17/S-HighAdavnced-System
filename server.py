@@ -15,9 +15,14 @@ import string
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import urllib.parse
+import html
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 512 * 1024  # 512 KB max request body
+app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024  # 3 MB max request body
+# (the profile-picture endpoint allows up to a 2MB image; base64 inflates
+# that by ~33% on the wire, so the global cap must be comfortably above 2MB
+# or every upload near the documented limit gets rejected before it's even
+# read, with a generic 413 instead of the endpoint's own error message)
 
 # ── CORS ───────────────────────────────────────────────────────────────────
 ALLOWED_ORIGINS = os.environ.get(
@@ -36,7 +41,12 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set.")
 
 JWT_SECRET        = os.environ.get("JWT_SECRET",        "change-me-in-production")
-SUPERADMIN_SECRET = os.environ.get("SUPERADMIN_SECRET", "change-this-superadmin-secret")
+SUPERADMIN_SECRET = os.environ.get("SUPERADMIN_SECRET")
+if not SUPERADMIN_SECRET:
+    raise RuntimeError(
+        "SUPERADMIN_SECRET environment variable is not set. "
+        "Refusing to start with a guessable default for an endpoint that can delete any company's account."
+    )
 RESEND_API_KEY    = os.environ.get("RESEND_API_KEY",    "")
 FROM_EMAIL        = os.environ.get("FROM_EMAIL",        "onboarding@resend.dev")
 
@@ -123,7 +133,7 @@ def haversine_m(lat1, lng1, lat2, lng2):
 # Allowed characters for email (RFC 5321 simplified)
 _EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 # Null byte / control character pattern
-_BAD_CHARS_RE = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+_BAD_CHARS_RE = re.compile(r'[--]')
 
 def clean_string(value: str, max_len: int, field: str) -> str:
     """Strip dangerous characters and enforce length."""
@@ -152,29 +162,44 @@ def get_device_fp() -> str:
 # ===== Progressive Lockout ===================================================
 # Escalation schedule: hours locked per level
 _LOCKOUT_HOURS = [12, 24, 24, 24 * 30]   # level 0→1→2→3→4
+# Sentinel device_fp used to track an identifier's lockout state regardless of
+# device. device_fp comes straight from a client-supplied header with no
+# server-side verification — without this, an attacker could bypass lockout
+# entirely by sending a different X-Device-FP value on every attempt, since
+# each "new device" would otherwise get its own fresh 4-attempt budget.
+_GLOBAL_FP = "__global__"
+
+def _get_lockout_record(conn, identifier: str, device_fp: str):
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM login_attempts WHERE identifier=%s AND device_fp=%s",
+        (identifier, device_fp)
+    )
+    return c.fetchone()
 
 def check_login_lockout(identifier: str, device_fp: str):
-    """Abort 429 if this identifier+device is currently locked out."""
+    """Abort 429 if this identifier is locked out, either on this specific
+    device or globally (across all devices, including spoofed ones)."""
     conn = get_db()
     c    = conn.cursor()
     now  = datetime.utcnow().isoformat()
     c.execute(
-        "SELECT attempt_count, locked_until, escalation FROM login_attempts WHERE identifier=%s AND device_fp=%s",
-        (identifier, device_fp)
+        "SELECT locked_until FROM login_attempts WHERE identifier=%s AND device_fp IN (%s,%s)",
+        (identifier, device_fp, _GLOBAL_FP)
     )
-    rec = c.fetchone()
+    recs = c.fetchall()
     conn.close()
-    if not rec:
-        return  # No record — allowed
-    if rec["locked_until"] and rec["locked_until"] > now:
-        unlock = datetime.fromisoformat(rec["locked_until"])
-        diff   = unlock - datetime.utcnow()
-        hours  = int(diff.total_seconds() // 3600)
-        mins   = int((diff.total_seconds() % 3600) // 60)
-        raise Exception(f"Account locked. Try again in {hours}h {mins}m.")
+    for rec in recs:
+        if rec["locked_until"] and rec["locked_until"] > now:
+            unlock = datetime.fromisoformat(rec["locked_until"])
+            diff   = unlock - datetime.utcnow()
+            hours  = int(diff.total_seconds() // 3600)
+            mins   = int((diff.total_seconds() % 3600) // 60)
+            raise Exception(f"Account locked. Try again in {hours}h {mins}m.")
 
-def record_failed_login(identifier: str, device_fp: str):
-    """Increment failure count and apply lockout if threshold reached."""
+def _bump_attempt(identifier: str, device_fp: str) -> int:
+    """Increment the failure counter for one (identifier, device_fp) row,
+    applying lockout if the threshold is reached. Returns the new count."""
     conn = get_db()
     c    = conn.cursor()
     now  = datetime.utcnow()
@@ -194,7 +219,6 @@ def record_failed_login(identifier: str, device_fp: str):
 
     new_count  = rec["attempt_count"] + 1
     escalation = rec["escalation"]
-    locked_until = None
 
     if new_count >= 4:
         # Apply lockout at this escalation level
@@ -203,9 +227,9 @@ def record_failed_login(identifier: str, device_fp: str):
         new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
         c.execute(
             """UPDATE login_attempts
-               SET attempt_count=0, locked_until=%s, escalation=%s, last_attempt=%s
+               SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s
                WHERE id=%s""",
-            (locked_until, new_escalation, now.isoformat(), rec["id"])
+            (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
         )
     else:
         c.execute(
@@ -216,14 +240,22 @@ def record_failed_login(identifier: str, device_fp: str):
     conn.commit(); conn.close()
     return new_count
 
+def record_failed_login(identifier: str, device_fp: str):
+    """Increment failure count for both this specific device and the
+    identifier overall (see _GLOBAL_FP). Returns the higher of the two
+    counts, used for "N attempts remaining" messaging."""
+    device_count = _bump_attempt(identifier, device_fp)
+    global_count = _bump_attempt(identifier, _GLOBAL_FP)
+    return max(device_count, global_count)
+
 def record_successful_login(identifier: str, device_fp: str):
-    """Reset failure count on successful login."""
+    """Reset failure count on successful login, both per-device and global."""
     conn = get_db()
     c    = conn.cursor()
     c.execute(
         """UPDATE login_attempts SET attempt_count=0, locked_until=NULL, last_attempt=%s
-           WHERE identifier=%s AND device_fp=%s""",
-        (datetime.utcnow().isoformat(), identifier, device_fp)
+           WHERE identifier=%s AND device_fp IN (%s,%s)""",
+        (datetime.utcnow().isoformat(), identifier, device_fp, _GLOBAL_FP)
     )
     conn.commit(); conn.close()
 
@@ -264,8 +296,8 @@ def record_failed_pin(user_id: int):
         locked_until = (now + timedelta(hours=hours)).isoformat()
         new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
         c.execute(
-            "UPDATE pin_attempts SET attempt_count=0, locked_until=%s, escalation=%s, last_attempt=%s WHERE id=%s",
-            (locked_until, new_escalation, now.isoformat(), rec["id"])
+            "UPDATE pin_attempts SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s WHERE id=%s",
+            (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
         )
     else:
         c.execute(
@@ -282,6 +314,28 @@ def record_successful_pin(user_id: int):
         (datetime.utcnow().isoformat(), user_id)
     )
     conn.commit(); conn.close()
+
+def require_pin(user_id: int, data: dict):
+    """
+    Re-verify the admin's PIN server-side for sensitive account actions.
+    The frontend gates these flows behind a PIN modal, but that is a UX
+    convenience only — without this check, anyone holding a valid JWT
+    (stolen, replayed, or just read out of browser storage) could change
+    the password/PIN/email with no PIN at all. This closes that gap.
+    """
+    pin = clean_string(data.get("pin", ""), 10, "pin")
+    if not pin:
+        abort(400, description="'pin' is required to confirm this change.")
+    check_pin_lockout(user_id)
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("SELECT pin FROM users WHERE id=%s", (user_id,))
+    user = c.fetchone()
+    conn.close()
+    if not user or not check_password(pin, user["pin"]):
+        record_failed_pin(user_id)
+        abort(403, description="Incorrect PIN.")
+    record_successful_pin(user_id)
 
 
 # ===== SSRF / Webhook URL Validation =========================================
@@ -454,7 +508,7 @@ def init_db():
             expires_at          TEXT,
             status              TEXT    NOT NULL DEFAULT 'trusted',
             FOREIGN KEY (user_id) REFERENCES users(id),
-            UNIQUE (user_id, role, device_fingerprint)
+            UNIQUE (user_id, role, staff_id, device_fingerprint)
         )
     """)
 
@@ -519,6 +573,20 @@ def init_db():
             c.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {definition}")
         except Exception:
             conn.rollback()
+
+    # Fix: original UNIQUE constraint predates staff_id, so two different
+    # staff members sharing the same fingerprint (same phone model, same
+    # shared kiosk device, etc.) collide and silently lose pending requests.
+    try:
+        c.execute("ALTER TABLE trusted_devices DROP CONSTRAINT IF EXISTS trusted_devices_user_id_role_device_fingerprint_key")
+        c.execute("""
+            ALTER TABLE trusted_devices
+            ADD CONSTRAINT trusted_devices_user_role_staff_fp_key
+            UNIQUE (user_id, role, staff_id, device_fingerprint)
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
     conn.commit()
     conn.close()
@@ -623,6 +691,8 @@ def register():
     if not company:  abort(400, description="'company' is required.")
     if not email:    abort(400, description="'email' is required.")
     if not password: abort(400, description="'password' is required.")
+    if len(password) < 8:
+        abort(400, description="Password must be at least 8 characters.")
     if not pin or not PIN_RE.match(pin):
         abort(400, description="'pin' must be 4–8 digits.")
 
@@ -728,13 +798,8 @@ def staff_login():
             "enabled": acc["geofence_enabled"]
         },
         "schedule": {
-            "checkin_time":          acc["checkin_time"]          or "09:00",
-            "checkout_time":         acc["checkout_time"]         or "17:00",
-            "night_checkin_time":    acc.get("night_checkin_time"),
-            "night_checkout_time":   acc.get("night_checkout_time"),
-            "clockout_enabled":      acc.get("clockout_enabled", True),
-            "night_clockout_enabled":acc.get("night_clockout_enabled", True),
-            "sound_enabled":         acc.get("sound_enabled", True)
+            "checkin_time":  acc["checkin_time"]  or "09:00",
+            "checkout_time": acc["checkout_time"] or "17:00"
         }
     })
 
@@ -743,7 +808,7 @@ def staff_login():
 def staff_register():
     data       = require_json()
     email      = validate_email_format(data.get("email", ""))
-    password   = clean_string(data.get("password", ""), MAX_PASSWORD_LEN, "password")
+    password   = sanitize(data.get("password"),      MAX_PASSWORD_LEN, "password")
     staff_id   = validate_staff_id(data.get("staff_id"))
     comp_email = validate_email_format(data.get("company_email", ""))
 
@@ -819,7 +884,7 @@ def get_profile():
     current = get_current_user()
     conn    = get_db()
     c       = conn.cursor()
-    c.execute("""SELECT id, company, email, phone, created_at, profile_picture,
+    c.execute("""SELECT id, company, email, phone, created_at,
                         geofence_lat, geofence_lng, geofence_radius, geofence_enabled,
                         checkin_time, checkout_time, night_checkin_time, night_checkout_time,
                         clockout_enabled, night_clockout_enabled, sound_enabled, max_devices
@@ -833,15 +898,17 @@ def get_profile():
 
 @app.route("/auth/update-profile", methods=["PUT"])
 def update_profile():
-    """Admin updates their own profile. PIN already verified on frontend before calling this."""
+    """Admin updates their own profile. Requires PIN re-verification."""
     current = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
     data    = require_json()
-    raw_email = data.get("email")
-    email   = validate_email_format(raw_email) if raw_email else None
-    phone   = clean_string(data.get("phone"),   MAX_PHONE_LEN,   "phone")
-    company = clean_string(data.get("company"), MAX_COMPANY_LEN, "company")
+    require_pin(current["sub"], data)
+    email   = sanitize(data.get("email"),   MAX_EMAIL_LEN,    "email")
+    if email:
+        email = validate_email_format(email)
+    phone   = sanitize(data.get("phone"),   MAX_PHONE_LEN,    "phone")
+    company = sanitize(data.get("company"), MAX_COMPANY_LEN,  "company")
 
     conn = get_db()
     try:
@@ -863,11 +930,12 @@ def update_profile():
 
 @app.route("/auth/change-password", methods=["PUT"])
 def change_password():
-    """Admin changes their own password. PIN already verified on frontend."""
+    """Admin changes their own password. Requires PIN re-verification."""
     current     = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
     data        = require_json()
+    require_pin(current["sub"], data)
     new_password = sanitize(data.get("new_password"), MAX_PASSWORD_LEN, "new_password")
     if not new_password or len(new_password) < 8:
         abort(400, description="Password must be at least 8 characters.")
@@ -881,11 +949,12 @@ def change_password():
 
 @app.route("/auth/change-pin", methods=["PUT"])
 def change_pin():
-    """Admin changes their own PIN. Old PIN verified on frontend first."""
+    """Admin changes their own PIN. Requires the OLD PIN, re-verified server-side."""
     current  = get_current_user()
     if current.get("role") != "admin":
         abort(403, description="Admin only.")
     data     = require_json()
+    require_pin(current["sub"], data)
     new_pin  = sanitize(data.get("new_pin"), 10, "new_pin")
     if not new_pin or not PIN_RE.match(new_pin):
         abort(400, description="PIN must be 4–8 digits.")
@@ -901,10 +970,8 @@ def change_pin():
 @app.route("/auth/forgot-password", methods=["POST"])
 def forgot_password():
     data  = require_json()
-    email = sanitize(data.get("email"), MAX_EMAIL_LEN, "email")
+    email = validate_email_format(data.get("email", ""))
     role  = data.get("role", "admin")
-    if role not in ("admin", "staff"):
-        abort(400, description="Invalid role.")
     if not email:
         abort(400, description="'email' is required.")
 
@@ -955,13 +1022,13 @@ def forgot_password():
 @app.route("/auth/reset-password", methods=["POST"])
 def reset_password():
     data         = require_json()
-    email        = sanitize(data.get("email"),        MAX_EMAIL_LEN,    "email")
+    email        = validate_email_format(data.get("email", ""))
     code         = sanitize(data.get("code"),         10,               "code")
     new_password = sanitize(data.get("new_password"), MAX_PASSWORD_LEN, "new_password")
     role         = data.get("role", "admin")
 
-    if not email or not code or not new_password:
-        abort(400, description="email, code and new_password are required.")
+    if not code or not new_password:
+        abort(400, description="code and new_password are required.")
     if len(new_password) < 8:
         abort(400, description="Password must be at least 8 characters.")
 
@@ -982,6 +1049,10 @@ def reset_password():
     else:
         c.execute("UPDATE users SET password=%s WHERE email=%s", (hashed, email))
 
+    if c.rowcount == 0:
+        conn.close()
+        abort(404, description="Account not found.")
+
     c.execute("UPDATE password_resets SET used=TRUE WHERE id=%s", (row["id"],))
     conn.commit()
     conn.close()
@@ -998,15 +1069,22 @@ def set_geofence():
     enabled = bool(data.get("enabled", False))
     lat     = data.get("lat")
     lng     = data.get("lng")
-    radius  = int(data.get("radius", 200))
+    try:
+        radius = int(data.get("radius", 200))
+    except (TypeError, ValueError):
+        abort(400, description="'radius' must be a number.")
     conn = get_db()
     c    = conn.cursor()
     if enabled:
         if lat is None or lng is None:
             abort(400, description="lat and lng are required when enabling geofence.")
+        try:
+            lat = float(lat); lng = float(lng)
+        except (TypeError, ValueError):
+            abort(400, description="lat and lng must be numbers.")
         c.execute("""UPDATE users SET geofence_lat=%s, geofence_lng=%s,
                      geofence_radius=%s, geofence_enabled=TRUE WHERE id=%s""",
-                  (float(lat), float(lng), radius, current["sub"]))
+                  (lat, lng, radius, current["sub"]))
     else:
         c.execute("UPDATE users SET geofence_enabled=FALSE WHERE id=%s", (current["sub"],))
     conn.commit()
@@ -1029,14 +1107,10 @@ def set_schedule():
     time_re = re.compile(r'^\d{2}:\d{2}$')
     if not time_re.match(checkin_time) or not time_re.match(checkout_time):
         abort(400, description="Times must be in HH:MM format.")
-    night_checkin  = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
-    night_checkout = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
-    if night_checkin and not time_re.match(night_checkin):
-        abort(400, description="night_checkin_time must be HH:MM format.")
-    if night_checkout and not time_re.match(night_checkout):
-        abort(400, description="night_checkout_time must be HH:MM format.")
     conn = get_db()
     c    = conn.cursor()
+    night_checkin           = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
+    night_checkout          = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
     clockout_enabled        = bool(data.get("clockout_enabled", True))
     night_clockout_enabled  = bool(data.get("night_clockout_enabled", True))
     sound_enabled           = bool(data.get("sound_enabled", True))
@@ -1132,9 +1206,10 @@ def remove_staff(staff_id):
         if not staff_exists(conn, current["sub"], staff_id):
             abort(404)
         c = conn.cursor()
-        c.execute("DELETE FROM attendance     WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
-        c.execute("DELETE FROM staff_accounts WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
-        c.execute("DELETE FROM staff          WHERE id=%s AND user_id=%s",       (staff_id, current["sub"]))
+        c.execute("DELETE FROM attendance      WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
+        c.execute("DELETE FROM staff_accounts  WHERE staff_id=%s AND user_id=%s", (staff_id, current["sub"]))
+        c.execute("DELETE FROM trusted_devices WHERE staff_id=%s AND user_id=%s AND role='staff'", (staff_id, current["sub"]))
+        c.execute("DELETE FROM staff           WHERE id=%s AND user_id=%s",       (staff_id, current["sub"]))
         conn.commit()
     finally:
         conn.close()
@@ -1196,19 +1271,20 @@ def record_attendance():
     action = sanitize(data.get("action"), 20, "action")
     lat    = data.get("lat")
     lng    = data.get("lng")
-    if lat is not None:
-        try:
-            lat = float(lat)
-            if not (-90 <= lat <= 90): abort(400, description="Invalid latitude.")
-        except (ValueError, TypeError): abort(400, description="lat must be a number.")
-    if lng is not None:
-        try:
-            lng = float(lng)
-            if not (-180 <= lng <= 180): abort(400, description="Invalid longitude.")
-        except (ValueError, TypeError): abort(400, description="lng must be a number.")
 
     if action not in VALID_ACTIONS:
         abort(400, description=f"'action' must be one of: {', '.join(VALID_ACTIONS)}.")
+
+    if lat is not None:
+        try:
+            lat = float(lat)
+        except (TypeError, ValueError):
+            abort(400, description="'lat' must be a number.")
+    if lng is not None:
+        try:
+            lng = float(lng)
+        except (TypeError, ValueError):
+            abort(400, description="'lng' must be a number.")
 
     conn = get_db()
     try:
@@ -1223,7 +1299,7 @@ def record_attendance():
         if settings and settings.get("geofence_enabled") and settings["geofence_lat"] and lat is not None and lng is not None:
             dist = haversine_m(
                 settings["geofence_lat"], settings["geofence_lng"],
-                float(lat), float(lng)
+                lat, lng
             )
             if dist > settings["geofence_radius"]:
                 abort(403, description=f"Unable to {action.replace('_',' ')} due to location mismatch. You are {int(dist)}m away (allowed: {settings['geofence_radius']}m).")
@@ -1231,12 +1307,47 @@ def record_attendance():
         if not staff_exists(conn, current["sub"], staff_id):
             abort(404, description=f"Staff '{staff_id}' not found.")
 
+        # Prevent duplicate/out-of-order actions (double-tap, replayed
+        # request, checking out without ever checking in) AND cap staff to
+        # one check-in + one check-out per calendar day total — even if
+        # they're assigned to both day and night shifts, it's still just
+        # one clock-in and one clock-out for the day, not one per shift.
+        c.execute(
+            """SELECT action, timestamp FROM attendance WHERE user_id=%s AND staff_id=%s
+               ORDER BY timestamp DESC LIMIT 1""",
+            (current["sub"], staff_id)
+        )
+        last = c.fetchone()
+
+        if action == "check_in":
+            if last and last["action"] == "check_in":
+                abort(409, description="Already checked in. Check out first before checking in again.")
+            # No open check-in right now. Make sure today's one allowed
+            # cycle hasn't already been used (e.g. they already did their
+            # day-shift check-in earlier and are now trying to check in
+            # again for a night shift on the same calendar day).
+            today_str = datetime.utcnow().date().isoformat()
+            c.execute(
+                """SELECT 1 FROM attendance WHERE user_id=%s AND staff_id=%s
+                   AND action='check_in' AND timestamp LIKE %s LIMIT 1""",
+                (current["sub"], staff_id, today_str + "%")
+            )
+            if c.fetchone():
+                abort(409, description="Already clocked in and out for today. Only one check-in/check-out is allowed per day, even across day and night shifts.")
+        else:  # check_out
+            if not last:
+                abort(409, description="Cannot check out before checking in.")
+            if last["action"] == "check_out":
+                abort(409, description="Already checked out. Check in first before checking out again.")
+            # else: there's an open check-in — always allow completing it,
+            # regardless of which calendar date the check-out itself lands
+            # on (a night shift's check-out can legitimately fall on the
+            # day after its check-in).
+
         timestamp = datetime.utcnow().isoformat()
         c.execute(
             "INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng) VALUES (%s,%s,%s,%s,%s,%s)",
-            (current["sub"], staff_id, action, timestamp,
-             lat,
-             lng)
+            (current["sub"], staff_id, action, timestamp, lat, lng)
         )
         conn.commit()
     finally:
@@ -1305,26 +1416,26 @@ def attendance_summary():
     for sid, events in events_by_staff.items():
         total_seconds = 0
         days_present  = set()
-        last_checkin_ts = None
-        sessions        = []
+        check_in_time = None
+        sessions      = []
         lateness_grades = []
 
         for ev in events:
             ts = datetime.fromisoformat(ev["timestamp"])
             if ev["action"] == "check_in":
-                last_checkin_ts = ts
+                check_in_time = ts
                 days_present.add(ts.date().isoformat())
                 grade_label, mins_late = compute_lateness_grade(ts, checkin_time)
                 lateness_grades.append({"date": ts.date().isoformat(), "grade": grade_label, "minutes_late": mins_late})
-            elif ev["action"] == "check_out" and last_checkin_ts:
-                dur = (ts - last_checkin_ts).total_seconds()
+            elif ev["action"] == "check_out" and check_in_time:
+                dur = (ts - check_in_time).total_seconds()
                 total_seconds += dur
                 sessions.append({
-                    "in":    last_checkin_ts.isoformat(),
+                    "in":    check_in_time.isoformat(),
                     "out":   ts.isoformat(),
                     "hours": round(dur / 3600, 2)
                 })
-                last_checkin_ts = None
+                check_in_time = None
 
         total_hours = round(total_seconds / 3600, 2)
 
@@ -1348,8 +1459,8 @@ def attendance_summary():
             "grade":          overall,
             "lateness_log":   lateness_grades,
             "sessions":       sessions,
-            "expected_checkin":  checkin_time,
-            "expected_checkout": checkout_time
+            "checkin_time":   checkin_time,
+            "checkout_time":  checkout_time
         })
 
     # Add absent staff (only for daily period)
@@ -1441,18 +1552,12 @@ def analytics():
     """, (current["sub"], today + "%", today + "%"))
     still_in = [dict(r) for r in c.fetchall()]
 
-    trend_start = (now - timedelta(days=13)).date().isoformat()
-    c.execute("""
-        SELECT CAST(timestamp AS DATE) as day, COUNT(*) as n
-        FROM attendance
-        WHERE user_id=%s AND action='check_in' AND timestamp >= %s
-        GROUP BY CAST(timestamp AS DATE)
-    """, (current["sub"], trend_start))
-    trend_map = {str(r["day"]): r["n"] for r in c.fetchall()}
     trend = []
     for i in range(13, -1, -1):
         d = (now - timedelta(days=i)).date().isoformat()
-        trend.append({"date": d, "checkins": trend_map.get(d, 0)})
+        c.execute("SELECT COUNT(*) AS n FROM attendance WHERE user_id=%s AND action='check_in' AND timestamp LIKE %s",
+                  (current["sub"], d + "%"))
+        trend.append({"date": d, "checkins": c.fetchone()["n"]})
 
     conn.close()
 
@@ -1596,6 +1701,11 @@ def report_attendance():
     conn = get_db()
     c    = conn.cursor()
     staff_filter = request.args.get("staff_id")
+    if current.get("role") == "staff":
+        # Staff can only ever pull their own records, regardless of what
+        # staff_id they pass — otherwise any staff account could read
+        # every colleague's attendance + GPS history.
+        staff_filter = current.get("staff_id")
     query = """
         SELECT a.id, a.staff_id, s.name, a.action, a.timestamp, a.lat, a.lng
         FROM attendance a
@@ -1659,13 +1769,20 @@ def superadmin_delete_user(user_id):
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute("SELECT id FROM users WHERE id=%s", (user_id,))
-        if not c.fetchone():
+        c.execute("SELECT id, email FROM users WHERE id=%s", (user_id,))
+        user_row = c.fetchone()
+        if not user_row:
             abort(404)
         c.execute("DELETE FROM attendance            WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM staff_accounts        WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM staff                 WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM external_integrations WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM trusted_devices       WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM pin_attempts          WHERE user_id=%s", (user_id,))
+        # Free up the email's lockout history so a future account that
+        # re-registers with this same address doesn't inherit a stranger's
+        # failed-login lockout state.
+        c.execute("DELETE FROM login_attempts WHERE identifier=%s", (user_row["email"],))
         c.execute("DELETE FROM users                 WHERE id=%s",      (user_id,))
         conn.commit()
     finally:
@@ -1734,9 +1851,15 @@ def submit_feedback():
 
     role     = current.get("role", "admin")
     sender   = current.get("company") or current.get("staff_id") or "Unknown"
-    stars    = "⭐" * int(rating) if rating and str(rating).isdigit() else ""
+    rating_n = 0
+    if rating is not None and str(rating).isdigit():
+        rating_n = max(0, min(5, int(rating)))
+    stars = "⭐" * rating_n
 
-    html = f"""
+    safe_sender  = html.escape(str(sender))
+    safe_message = html.escape(message)
+
+    html_body = f"""
     <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;
                 background:#0f204a;color:#eef4ff;border-radius:16px">
       <h2 style="color:#3fc1c9;margin-bottom:4px">📬 New Feedback</h2>
@@ -1745,17 +1868,17 @@ def submit_feedback():
       </p>
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <tr><td style="color:#bfc9e3;padding:6px 0;width:120px">From</td>
-            <td style="color:#fff;font-weight:700">{sender} ({role})</td></tr>
+            <td style="color:#fff;font-weight:700">{safe_sender} ({role})</td></tr>
         {'<tr><td style="color:#bfc9e3;padding:6px 0">Rating</td><td>' + stars + '</td></tr>' if stars else ''}
         <tr><td style="color:#bfc9e3;padding:6px 0;vertical-align:top">Message</td>
-            <td style="color:#fff">{message}</td></tr>
+            <td style="color:#fff">{safe_message}</td></tr>
         <tr><td style="color:#bfc9e3;padding:6px 0">Time</td>
             <td style="color:#fff">{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</td></tr>
       </table>
     </div>
     """
     sent = send_email("ongodsolomon17@gmail.com",
-                      f"Feedback from {sender} — S Advanced Attendance", html)
+                      f"Feedback from {sender} — S Advanced Attendance", html_body)
     return jsonify({"ok": True, "sent": sent})
 
 
@@ -1941,11 +2064,20 @@ def verify_device():
                     return jsonify({"status": "trusted", "device_id": dev["id"], "temp": True,
                                     "expires_at": dev["expires_at"]})
                 else:
-                    # Temp approval expired
-                    c.execute("UPDATE trusted_devices SET status='expired' WHERE id=%s", (dev["id"],))
+                    # Temp approval expired. Fall back to "pending" (instead of
+                    # a dead-end "expired" status) so this device reappears in
+                    # the admin's Pending Devices queue for a quick re-approval,
+                    # rather than disappearing from every admin view forever.
+                    c.execute(
+                        "UPDATE trusted_devices SET status='pending', created_at=%s WHERE id=%s",
+                        (datetime.utcnow().isoformat(), dev["id"])
+                    )
                     conn.commit()
                     conn.close()
-                    return jsonify({"status": "rejected", "reason": "Temporary access expired."})
+                    return jsonify({
+                        "status": "pending",
+                        "reason": "Your temporary access expired. A new approval request has been sent to your admin."
+                    })
             elif dev["status"] == "pending":
                 conn.close()
                 return jsonify({"status": "pending"})
@@ -1958,7 +2090,9 @@ def verify_device():
         INSERT INTO trusted_devices
         (user_id, role, staff_id, device_fingerprint, device_name, created_at, last_used, expires_at, status)
         VALUES (%s,'staff',%s,%s,%s,%s,%s,NULL,'pending')
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (user_id, role, staff_id, device_fingerprint)
+        DO UPDATE SET status='pending', device_name=EXCLUDED.device_name,
+                       created_at=EXCLUDED.created_at, expires_at=NULL
     """, (current["sub"], staff_id, fingerprint, device_name,
           datetime.utcnow().isoformat(), now))
     conn.commit()
@@ -2012,8 +2146,11 @@ def approve_device(device_id):
         UPDATE trusted_devices SET status='approved_temp', expires_at=%s
         WHERE id=%s AND user_id=%s AND role='staff'
     """, (expires, device_id, current["sub"]))
+    matched = c.rowcount
     conn.commit()
     conn.close()
+    if matched == 0:
+        abort(404, description="Device request not found.")
     return jsonify({"ok": True, "expires_at": expires})
 
 
@@ -2029,8 +2166,11 @@ def reject_device(device_id):
         UPDATE trusted_devices SET status='rejected'
         WHERE id=%s AND user_id=%s AND role='staff'
     """, (device_id, current["sub"]))
+    matched = c.rowcount
     conn.commit()
     conn.close()
+    if matched == 0:
+        abort(404, description="Device request not found.")
     return jsonify({"ok": True})
 
 
@@ -2038,12 +2178,17 @@ def reject_device(device_id):
 def revoke_device(device_id):
     """Admin revokes any device (their own or staff)."""
     current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
     conn    = get_db()
     c       = conn.cursor()
     c.execute("DELETE FROM trusted_devices WHERE id=%s AND user_id=%s",
               (device_id, current["sub"]))
+    matched = c.rowcount
     conn.commit()
     conn.close()
+    if matched == 0:
+        abort(404, description="Device not found.")
     return jsonify({"ok": True})
 
 
