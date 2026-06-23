@@ -15,6 +15,7 @@ import string
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import urllib.parse
+import urllib.request
 import html
 
 app = Flask(__name__)
@@ -49,6 +50,21 @@ if not SUPERADMIN_SECRET:
     )
 RESEND_API_KEY    = os.environ.get("RESEND_API_KEY",    "")
 FROM_EMAIL        = os.environ.get("FROM_EMAIL",        "onboarding@resend.dev")
+# SMS (Twilio) — used for the "send reset code via phone" option. Sign up at
+# twilio.com to get these three values; if unset, the phone channel just
+# silently fails server-side (forgot-password still returns its normal
+# generic response either way, so this doesn't change the API's behavior
+# from the outside — it just means no SMS actually goes out).
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN",  "")
+TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
+# WhatsApp uses the same Twilio account/token, but needs its own
+# WhatsApp-approved sender. Twilio's shared sandbox number
+# (whatsapp:+14155238886) works for testing without any extra setup —
+# just put "+14155238886" here while testing, and recipients must first
+# send your sandbox join code to that number once. For production you'd
+# apply for your own WhatsApp Business sender through Twilio.
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
 
 # ── Input constraints ──────────────────────────────────────────────────────
 MAX_NAME_LEN     = 80
@@ -57,7 +73,7 @@ MAX_PHONE_LEN    = 30
 MAX_ID_LEN       = 20
 MAX_COMPANY_LEN  = 80
 MAX_PASSWORD_LEN = 128
-PIN_RE           = re.compile(r'^\d{4,8}$')
+PIN_RE           = re.compile(r'^\d{4}$')
 VALID_ACTIONS    = {"check_in", "check_out"}
 STAFF_ID_RE      = re.compile(r'^[A-Za-z0-9_\-]+$')
 
@@ -133,7 +149,7 @@ def haversine_m(lat1, lng1, lat2, lng2):
 # Allowed characters for email (RFC 5321 simplified)
 _EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 # Null byte / control character pattern
-_BAD_CHARS_RE = re.compile(r'[--]')
+_BAD_CHARS_RE = re.compile(r'[\x00--]')
 
 def clean_string(value: str, max_len: int, field: str) -> str:
     """Strip dangerous characters and enforce length."""
@@ -323,15 +339,15 @@ def require_pin(user_id: int, data: dict):
     (stolen, replayed, or just read out of browser storage) could change
     the password/PIN/email with no PIN at all. This closes that gap.
     """
-    pin = clean_string(data.get("pin", ""), 10, "pin")
-    if not pin:
-        abort(400, description="'pin' is required to confirm this change.")
+    pin = clean_string(data.get("pin", ""), 4, "pin")
+    if not pin or not PIN_RE.match(pin):
+        abort(400, description="'pin' must be exactly 4 digits.")
     check_pin_lockout(user_id)
     conn = get_db()
     c    = conn.cursor()
     c.execute("SELECT pin FROM users WHERE id=%s", (user_id,))
     user = c.fetchone()
-    conn.close()
+    conn.close()   # always closed — no longer leaks on wrong-PIN path
     if not user or not check_password(pin, user["pin"]):
         record_failed_pin(user_id)
         abort(403, description="Incorrect PIN.")
@@ -398,6 +414,52 @@ def send_email(to: str, subject: str, html: str) -> bool:
     except Exception as e:
         print(f"[EMAIL] ERROR sending to {to}: {e}", flush=True)
         return False
+
+
+# ===== SMS / WhatsApp (Twilio) ===============================================
+def _twilio_send(from_number: str, to_number: str, body: str, label: str) -> bool:
+    """Shared Twilio Messages API call, used by both send_sms() and
+    send_whatsapp() — they only differ in which from/to numbers get used."""
+    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and from_number):
+        print(f"[{label}] ERROR: Twilio credentials/sender are not set.", flush=True)
+        return False
+    try:
+        url     = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        payload = urllib.parse.urlencode({
+            "From": from_number,
+            "To":   to_number,
+            "Body": body
+        }).encode()
+        creds = base64.b64encode(f"{TWILIO_ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}".encode()).decode()
+        req = urllib.request.Request(url, data=payload, headers={
+            "Authorization": f"Basic {creds}",
+            "Content-Type":  "application/x-www-form-urlencoded"
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ok = 200 <= resp.status < 300
+            print(f"[{label}] Sent to {to_number} — status {resp.status}", flush=True)
+            return ok
+    except Exception as e:
+        print(f"[{label}] ERROR sending to {to_number}: {e}", flush=True)
+        return False
+
+def send_sms(to: str, message: str) -> bool:
+    """Send a plain-text SMS via Twilio's REST API. Requires TWILIO_ACCOUNT_SID,
+    TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER to be set as env vars (sign up at
+    twilio.com). Swap this implementation if you'd rather use a different
+    provider (e.g. Termii, Africa's Talking) — only this function needs to
+    change, every caller just expects a bool back."""
+    return _twilio_send(TWILIO_FROM_NUMBER, to, message, "SMS")
+
+def send_whatsapp(to: str, message: str) -> bool:
+    """Send a WhatsApp message via Twilio. Requires TWILIO_ACCOUNT_SID,
+    TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_FROM (a WhatsApp-approved Twilio
+    sender — their shared sandbox number works for testing). Twilio's API
+    requires both numbers to be prefixed with "whatsapp:"."""
+    from_number = f"whatsapp:{TWILIO_WHATSAPP_FROM}" if TWILIO_WHATSAPP_FROM else ""
+    to_number   = to if to.startswith("whatsapp:") else f"whatsapp:{to}"
+    return _twilio_send(from_number, to_number, message, "WHATSAPP")
+
 
 
 # ===== Database =============================================================
@@ -544,12 +606,26 @@ def init_db():
             role       TEXT   NOT NULL DEFAULT 'admin',
             code       TEXT   NOT NULL,
             expires_at TEXT   NOT NULL,
-            used       BOOLEAN DEFAULT FALSE
+            used       BOOLEAN DEFAULT FALSE,
+            attempts   INTEGER NOT NULL DEFAULT 0
         )
     """)
 
+    # Append-only log used purely for rate-limiting forgot-password requests
+    # (separate from password_resets, which gets wiped/replaced on every new
+    # request and so can't double as a request history).
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS reset_requests (
+            id           SERIAL PRIMARY KEY,
+            identifier   TEXT NOT NULL,
+            requested_at TEXT NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_reset_requests_identifier ON reset_requests(identifier)")
+
     # Migrations for existing tables
     migrations = [
+        ("password_resets", "attempts",     "INTEGER NOT NULL DEFAULT 0"),
         ("users", "geofence_lat",    "DOUBLE PRECISION"),
         ("users", "geofence_enabled", "BOOLEAN DEFAULT FALSE"),
         ("users", "geofence_lng",    "DOUBLE PRECISION"),
@@ -686,7 +762,7 @@ def register():
     email    = validate_email_format(data.get("email", ""))
     phone    = clean_string(data.get("phone"),    MAX_PHONE_LEN,    "phone")
     password = clean_string(data.get("password"), MAX_PASSWORD_LEN, "password")
-    pin      = clean_string(data.get("pin"),      10,               "pin")
+    pin      = clean_string(data.get("pin"),      4,                "pin")
 
     if not company:  abort(400, description="'company' is required.")
     if not email:    abort(400, description="'email' is required.")
@@ -694,7 +770,7 @@ def register():
     if len(password) < 8:
         abort(400, description="Password must be at least 8 characters.")
     if not pin or not PIN_RE.match(pin):
-        abort(400, description="'pin' must be 4–8 digits.")
+        abort(400, description="'pin' must be exactly 4 digits.")
 
     conn = get_db()
     try:
@@ -849,9 +925,9 @@ def staff_register():
 def verify_pin():
     current = get_current_user()
     data    = require_json()
-    pin     = clean_string(data.get("pin", ""), 10, "pin")
-    if not pin:
-        abort(400, description="'pin' is required.")
+    pin     = clean_string(data.get("pin", ""), 4, "pin")
+    if not pin or not PIN_RE.match(pin):
+        abort(400, description="'pin' must be exactly 4 digits.")
     user_id = current["sub"]
     # Check PIN lockout
     check_pin_lockout(user_id)
@@ -955,9 +1031,9 @@ def change_pin():
         abort(403, description="Admin only.")
     data     = require_json()
     require_pin(current["sub"], data)
-    new_pin  = sanitize(data.get("new_pin"), 10, "new_pin")
+    new_pin  = sanitize(data.get("new_pin"), 4, "new_pin")
     if not new_pin or not PIN_RE.match(new_pin):
-        abort(400, description="PIN must be 4–8 digits.")
+        abort(400, description="PIN must be exactly 4 digits.")
     conn = get_db()
     c    = conn.cursor()
     c.execute("UPDATE users SET pin=%s WHERE id=%s", (hash_password(new_pin), current["sub"]))
@@ -969,25 +1045,61 @@ def change_pin():
 # ── Forgot password ──────────────────────────────────────────────────────────
 @app.route("/auth/forgot-password", methods=["POST"])
 def forgot_password():
-    data  = require_json()
-    email = validate_email_format(data.get("email", ""))
-    role  = data.get("role", "admin")
-    if not email:
-        abort(400, description="'email' is required.")
+    data    = require_json()
+    email   = validate_email_format(data.get("email", ""))
+    role    = data.get("role", "admin")
+    channel = data.get("channel", "email")
+    if channel not in ("email", "phone", "whatsapp"):
+        abort(400, description="'channel' must be 'email', 'phone', or 'whatsapp'.")
 
-    # Check user exists (admin or staff account)
+    GENERIC_RESPONSE = jsonify({"ok": True, "message": "If this account exists, a code has been sent."})
+
+    # Rate limit: at most 3 reset requests per email per hour. Checked
+    # before any account lookup and applied identically whether or not the
+    # account actually exists, so this can't be used to distinguish real
+    # accounts from fake ones via timing or response differences — and it
+    # caps how many times someone can be spammed with codes (now a real
+    # cost concern too, since phone/WhatsApp channels mean actual Twilio
+    # charges, not just an annoying inbox).
     conn = get_db()
     c    = conn.cursor()
+    rate_key = f"{role}:{email}"
+    one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    c.execute(
+        "SELECT COUNT(*) AS n FROM reset_requests WHERE identifier=%s AND requested_at>%s",
+        (rate_key, one_hour_ago)
+    )
+    if c.fetchone()["n"] >= 3:
+        conn.close()
+        abort(429, description="Too many reset requests for this email. Please try again later.")
+    c.execute(
+        "INSERT INTO reset_requests (identifier, requested_at) VALUES (%s,%s)",
+        (rate_key, datetime.utcnow().isoformat())
+    )
+    # Opportunistic cleanup of old log rows so this table doesn't grow forever
+    c.execute("DELETE FROM reset_requests WHERE requested_at<%s",
+              ((datetime.utcnow() - timedelta(days=1)).isoformat(),))
+    conn.commit()
+
+    # Check user exists (admin or staff account), and fetch their phone too
+    # — for staff, the phone lives on the `staff` directory row (entered by
+    # the admin), not on the staff's own login row.
     if role == "staff":
-        c.execute("SELECT id FROM staff_accounts WHERE email=%s", (email,))
+        c.execute("""
+            SELECT sa.id, st.phone
+            FROM staff_accounts sa
+            LEFT JOIN staff st ON st.id=sa.staff_id AND st.user_id=sa.user_id
+            WHERE sa.email=%s
+        """, (email,))
     else:
-        c.execute("SELECT id FROM users WHERE email=%s", (email,))
+        c.execute("SELECT id, phone FROM users WHERE email=%s", (email,))
     user = c.fetchone()
 
     if not user:
         conn.close()
-        # Return ok anyway to not leak existence
-        return jsonify({"ok": True, "message": "If this email exists, a code has been sent."})
+        # Same generic response whether or not the account exists, so this
+        # endpoint can't be used to enumerate accounts.
+        return GENERIC_RESPONSE
 
     # Generate 6-digit code
     code    = "".join(random.choices(string.digits, k=6))
@@ -1002,21 +1114,31 @@ def forgot_password():
     conn.commit()
     conn.close()
 
-    # Send email
-    html = f"""
-    <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0f204a;color:#eef4ff;border-radius:16px">
-      <h2 style="color:#3fc1c9;margin-bottom:8px">Password Reset</h2>
-      <p style="color:#bfc9e3">Your verification code is:</p>
-      <div style="font-size:42px;font-weight:800;letter-spacing:12px;text-align:center;
-                  padding:24px;background:rgba(255,255,255,0.08);border-radius:12px;margin:20px 0">
-        {code}
-      </div>
-      <p style="color:#bfc9e3;font-size:13px">This code expires in <strong>10 minutes</strong>.</p>
-      <p style="color:#bfc9e3;font-size:13px">If you didn't request this, ignore this email.</p>
-    </div>
-    """
-    sent = send_email(email, "Your Password Reset Code — S Advanced Attendance", html)
-    return jsonify({"ok": True, "message": "If this email exists, a code has been sent.", "email_sent": sent})
+    if channel == "phone" and user.get("phone"):
+        send_sms(user["phone"], f"Your S Advanced Attendance reset code is {code}. It expires in 10 minutes.")
+    elif channel == "whatsapp" and user.get("phone"):
+        send_whatsapp(user["phone"], f"Your S Advanced Attendance reset code is *{code}*. It expires in 10 minutes.")
+    else:
+        # Either email was requested, or phone/whatsapp was requested but
+        # there's no phone number on file for this account — fall back to
+        # email so the code always actually reaches them somewhere. The
+        # response is identical either way, so this fallback can't be used
+        # to probe whether a phone number exists on the account.
+        html = f"""
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0f204a;color:#eef4ff;border-radius:16px">
+          <h2 style="color:#3fc1c9;margin-bottom:8px">Password Reset</h2>
+          <p style="color:#bfc9e3">Your verification code is:</p>
+          <div style="font-size:42px;font-weight:800;letter-spacing:12px;text-align:center;
+                      padding:24px;background:rgba(255,255,255,0.08);border-radius:12px;margin:20px 0">
+            {code}
+          </div>
+          <p style="color:#bfc9e3;font-size:13px">This code expires in <strong>10 minutes</strong>.</p>
+          <p style="color:#bfc9e3;font-size:13px">If you didn't request this, ignore this email.</p>
+        </div>
+        """
+        send_email(email, "Your Password Reset Code — S Advanced Attendance", html)
+
+    return GENERIC_RESPONSE
 
 
 @app.route("/auth/reset-password", methods=["POST"])
@@ -1035,12 +1157,36 @@ def reset_password():
     conn = get_db()
     c    = conn.cursor()
     c.execute("""
+        SELECT id, attempts FROM password_resets
+        WHERE email=%s AND role=%s AND used=FALSE AND expires_at > %s
+        ORDER BY id DESC LIMIT 1
+    """, (email, role, datetime.utcnow().isoformat()))
+    pending = c.fetchone()
+
+    # No active (unused, unexpired) code at all for this email — nothing to
+    # check the guess against.
+    if not pending:
+        conn.close()
+        abort(400, description="Invalid or expired code.")
+
+    # Cap wrong guesses per active code. A 6-digit code is only 1,000,000
+    # possibilities — with no throttle at all, that's brute-forceable in
+    # minutes by anyone who knows the email. 5 wrong guesses burns the code
+    # entirely, forcing a fresh one (which is itself rate-limited to 3/hour
+    # via reset_requests), making brute-force practically infeasible.
+    if pending["attempts"] >= 5:
+        c.execute("UPDATE password_resets SET used=TRUE WHERE id=%s", (pending["id"],))
+        conn.commit(); conn.close()
+        abort(429, description="Too many incorrect attempts. Please request a new code.")
+
+    c.execute("""
         SELECT id FROM password_resets
-        WHERE email=%s AND role=%s AND code=%s AND used=FALSE AND expires_at > %s
-    """, (email, role, code, datetime.utcnow().isoformat()))
+        WHERE id=%s AND code=%s
+    """, (pending["id"], code))
     row = c.fetchone()
     if not row:
-        conn.close()
+        c.execute("UPDATE password_resets SET attempts=attempts+1 WHERE id=%s", (pending["id"],))
+        conn.commit(); conn.close()
         abort(400, description="Invalid or expired code.")
 
     hashed = hash_password(new_password)

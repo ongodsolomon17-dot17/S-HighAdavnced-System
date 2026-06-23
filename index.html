@@ -111,8 +111,8 @@
           </div>
         </div>
         <div class="field-group">
-          <label>Admin PIN <span class="req">*</span> <span class="field-hint">4–8 digits</span></label>
-          <input id="reg-pin" type="password" maxlength="8" placeholder="e.g. 1234" inputmode="numeric" />
+          <label>Admin PIN <span class="req">*</span> <span class="field-hint">4 digits</span></label>
+          <input id="reg-pin" type="password" maxlength="4" placeholder="e.g. 1234" inputmode="numeric" pattern="\d{4}" autocomplete="new-password" />
         </div>
         <button class="auth-submit" id="btn-register" onclick="handleRegister()">
           <span>Create Account</span><div class="btn-spinner hidden" id="register-spinner"></div>
@@ -234,7 +234,6 @@
           <button class="pill"        id="sbtn-weekly"  onclick="loadStaffSummary('weekly')">Weekly</button>
           <button class="pill"        id="sbtn-monthly" onclick="loadStaffSummary('monthly')">Monthly</button>
           <button class="pill"        id="sbtn-annual"  onclick="loadStaffSummary('annual')">Annual</button>
-          <button class="pill"        id="sbtn-annual2" onclick="loadStaffSummary('annual')" style="display:none">Annual</button>
         </div>
       </div>
       <div id="staff-summary-stats" class="summary-card-row"></div>
@@ -354,9 +353,9 @@
         <article class="card">
           <h2>Attendance Actions</h2>
           <!-- Staff Search -->
-          <div class="search-dropdown-wrap" style="margin-bottom:14px;position:relative">
+          <div class="search-dropdown-wrap" style="margin-bottom:14px">
             <input id="staff-search-input" type="text" placeholder="🔍 Search staff by name…"
-                   oninput="debouncedSearch(this.value, 'attendance')" autocomplete="off" />
+                   oninput="searchStaffLive(this.value, 'attendance')" autocomplete="off" />
             <div id="staff-search-results" class="search-results hidden"></div>
             <input id="attendance-staff" type="hidden" />
             <div id="selected-staff-display" style="margin-top:8px;font-size:13px;color:var(--accent);font-weight:600;min-height:20px"></div>
@@ -415,9 +414,9 @@
           <label>From Date</label><input type="date" id="report-from" />
           <label>To Date</label>  <input type="date" id="report-to" />
           <label>Staff</label>
-          <div class="search-dropdown-wrap" style="position:relative">
+          <div class="search-dropdown-wrap">
             <input id="report-search-input" type="text" placeholder="🔍 Search staff or leave blank for all…"
-                   oninput="debouncedSearch(this.value, 'report')" autocomplete="off" />
+                   oninput="searchStaffLive(this.value, 'report')" autocomplete="off" />
             <div id="report-search-results" class="search-results hidden"></div>
             <input id="report-staff-id" type="hidden" />
             <div id="report-staff-display" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600;min-height:18px"></div>
@@ -568,7 +567,7 @@
                 <button type="button" class="eye-btn" onclick="toggleEye('edit-new-password',this)">👁</button>
               </div>
               <label>New PIN</label>
-              <input id="edit-new-pin" type="password" maxlength="8" placeholder="Leave blank to keep" inputmode="numeric" />
+              <input id="edit-new-pin" type="password" maxlength="4" placeholder="Leave blank to keep" inputmode="numeric" pattern="\d{4}" autocomplete="new-password" />
             </div>
             <div class="button-row" style="margin-top:12px">
               <button class="accent" onclick="savePasswordPin()">🔑 Update Password/PIN</button>
@@ -771,10 +770,19 @@
     <p class="hint" style="margin-bottom:14px">Enter your email to receive a 6-digit reset code.</p>
     <div class="field-group"><label>Email Address</label>
       <input id="forgot-email" type="email" placeholder="your@email.com" /></div>
-    <div class="modal-actions"><button class="primary" onclick="sendResetCode()">Send Code</button></div>
+    <div class="modal-actions"><button class="primary" onclick="proceedToChannelChoice()">Continue</button></div>
+  </div>
+  <div id="forgot-step-channel" class="hidden">
+    <p class="hint" style="margin-bottom:14px">Where should we send your code?</p>
+    <div class="modal-actions" style="flex-direction:column">
+      <button class="primary" style="width:100%" onclick="sendResetCode('email')">📧 Email</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('phone')">📱 Phone (SMS)</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('whatsapp')">💬 WhatsApp</button>
+    </div>
+    <p class="hint" style="margin-top:10px"><a href="#" onclick="event.preventDefault(); backToForgotStep1()">← Back</a></p>
   </div>
   <div id="forgot-step-2" class="hidden">
-    <p class="hint" style="margin-bottom:14px">Enter the 6-digit code sent to your email.</p>
+    <p id="forgot-step-2-hint" class="hint" style="margin-bottom:14px">Enter the 6-digit code sent to you.</p>
     <div class="field-group"><label>Verification Code</label>
       <input id="forgot-code" type="text" maxlength="6" placeholder="123456" inputmode="numeric"
              style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center" /></div>

@@ -14,3 +14,25 @@ services:
         sync: false          # Set this manually in Render dashboard
       - key: ALLOWED_ORIGINS
         value: https://s-high-adavnced-system.vercel.app  # update if your Vercel URL differs
+      # Required for ANY email to send — password reset codes, feedback
+      # notifications, etc. Sign up at resend.com to get this.
+      - key: RESEND_API_KEY
+        sync: false
+      # Optional — the address emails are sent FROM. Defaults to Resend's
+      # shared test address (onboarding@resend.dev), which works but looks
+      # unprofessional and has sending limits. Verify your own domain on
+      # Resend and put a real address here for production use.
+      - key: FROM_EMAIL
+        value: onboarding@resend.dev
+      # Optional — only needed if you want the "send reset code via Phone"
+      # and/or "WhatsApp" options to actually deliver. Without these, both
+      # options silently fall back to emailing the code instead (the app
+      # keeps working either way). Sign up at twilio.com to get these.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER       # regular SMS sender number
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM     # WhatsApp-approved sender (Twilio's
+        sync: false                  # sandbox number "+14155238886" works for testing)

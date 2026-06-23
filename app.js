@@ -346,10 +346,11 @@ async function ensureStaffCache() {
   if (!_allStaffCache.length) { try { _allStaffCache = await listStaff(); } catch (_) {} }
 }
 
-function searchStaffLive(query, context) {
+async function searchStaffLive(query, context) {
   const resultsId  = context === "attendance" ? "staff-search-results"  : "report-search-results";
   const hiddenId   = context === "attendance" ? "attendance-staff"       : "report-staff-id";
   const displayId  = context === "attendance" ? "selected-staff-display" : "report-staff-display";
+  const inputId    = context === "attendance" ? "staff-search-input"     : "report-search-input";
   const results    = document.getElementById(resultsId);
 
   if (!query.trim()) {
@@ -360,6 +361,18 @@ function searchStaffLive(query, context) {
     }
     return;
   }
+
+  // Always make sure the staff list is actually loaded before filtering —
+  // don't rely on some other action (e.g. visiting the Reports tab) having
+  // already warmed the cache. ensureStaffCache() is a no-op once it's
+  // populated, so this costs nothing after the first search.
+  await ensureStaffCache();
+
+  // If the user kept typing while that load was in flight, a newer call to
+  // this function has already taken over — don't clobber its results with
+  // this now-stale query's matches.
+  const inputEl = document.getElementById(inputId);
+  if (inputEl && inputEl.value !== query) return;
 
   const q       = query.toLowerCase();
   const matches = _allStaffCache.filter(s =>
@@ -510,7 +523,7 @@ async function handleRegister() {
   if (!email)                { showAuthMessage("Please enter your email."); return; }
   if (password.length < 8)   { showAuthMessage("Password must be at least 8 characters."); return; }
   if (password !== password2){ showAuthMessage("Passwords do not match."); return; }
-  if (!/^\d{4,8}$/.test(pin)){ showAuthMessage("PIN must be 4–8 digits."); return; }
+  if (!/^\d{4}$/.test(pin)){ showAuthMessage("PIN must be exactly 4 digits."); return; }
   const btn = document.getElementById("btn-register");
   const sp  = document.getElementById("register-spinner");
   btn.disabled = true; sp.classList.remove("hidden");
@@ -697,21 +710,26 @@ function requestPin() {
 
 document.getElementById("pin-inputs").addEventListener("input", e => {
   if (!e.target.classList.contains("pin-box")) return;
+  // Strip any non-digit characters (desktop users can type letters; inputmode
+  // is just a hint and doesn't prevent this on desktop keyboards).
+  e.target.value = e.target.value.replace(/\D/g, "").slice(0, 1);
   const boxes = [...document.querySelectorAll(".pin-box")];
   const idx   = boxes.indexOf(e.target);
-  if (e.target.value && idx < boxes.length-1) boxes[idx+1].focus();
+  if (e.target.value && idx < boxes.length - 1) boxes[idx + 1].focus();
+  // Auto-submit once all 4 boxes are filled
+  if (boxes.every(b => b.value)) confirmPin();
 });
 document.getElementById("pin-inputs").addEventListener("keydown", e => {
   if (!e.target.classList.contains("pin-box")) return;
   const boxes = [...document.querySelectorAll(".pin-box")];
   const idx   = boxes.indexOf(e.target);
-  if (e.key === "Backspace" && !e.target.value && idx > 0) boxes[idx-1].focus();
+  if (e.key === "Backspace" && !e.target.value && idx > 0) boxes[idx - 1].focus();
   if (e.key === "Enter") confirmPin();
 });
 
 async function confirmPin() {
   const pin = [...document.querySelectorAll(".pin-box")].map(b => b.value).join("");
-  if (pin.length < 4) { document.getElementById("pin-error").classList.remove("hidden"); return; }
+  if (pin.length !== 4) { document.getElementById("pin-error").classList.remove("hidden"); return; }
   const btn = document.getElementById("btn-confirm-pin");
   btn.disabled = true;
   try {
@@ -738,19 +756,34 @@ let forgotRole = "admin";
 function showForgotPassword(role) {
   forgotRole = role;
   document.getElementById("forgot-step-1").classList.remove("hidden");
+  document.getElementById("forgot-step-channel").classList.add("hidden");
   document.getElementById("forgot-step-2").classList.add("hidden");
   document.getElementById("forgot-status").textContent = "";
   document.getElementById("forgot-email").value = "";
   openModal("forgot-modal");
 }
-async function sendResetCode() {
+function proceedToChannelChoice() {
+  const email = document.getElementById("forgot-email").value.trim();
+  if (!email) { document.getElementById("forgot-status").textContent = "Please enter your email."; return; }
+  document.getElementById("forgot-status").textContent = "";
+  document.getElementById("forgot-step-1").classList.add("hidden");
+  document.getElementById("forgot-step-channel").classList.remove("hidden");
+}
+function backToForgotStep1() {
+  document.getElementById("forgot-step-channel").classList.add("hidden");
+  document.getElementById("forgot-step-1").classList.remove("hidden");
+}
+const CHANNEL_LABELS = { email: "email", phone: "phone", whatsapp: "WhatsApp" };
+async function sendResetCode(channel) {
   const email = document.getElementById("forgot-email").value.trim();
   if (!email) { document.getElementById("forgot-status").textContent = "Please enter your email."; return; }
   try {
-    await apiFetch("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email, role: forgotRole }) }, false);
-    document.getElementById("forgot-step-1").classList.add("hidden");
+    await apiFetch("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email, role: forgotRole, channel }) }, false);
+    document.getElementById("forgot-step-channel").classList.add("hidden");
     document.getElementById("forgot-step-2").classList.remove("hidden");
-    document.getElementById("forgot-status").textContent = "Code sent! Check your email.";
+    const label = CHANNEL_LABELS[channel] || "email";
+    document.getElementById("forgot-step-2-hint").textContent = `Enter the 6-digit code sent to your ${label}.`;
+    document.getElementById("forgot-status").textContent = `Code sent! Check your ${label}.`;
   } catch (err) { document.getElementById("forgot-status").textContent = err.message; }
 }
 async function confirmResetCode() {
@@ -908,7 +941,7 @@ async function savePasswordPin() {
     catch (err) { showToast(err.message, "error"); return; }
   }
   if (newPin) {
-    if (!/^\d{4,8}$/.test(newPin)) { showToast("PIN must be 4–8 digits.", "error"); return; }
+    if (!/^\d{4}$/.test(newPin)) { showToast("PIN must be exactly 4 digits.", "error"); return; }
     try {
       await apiFetch("/auth/change-pin", { method: "PUT", body: JSON.stringify({ new_pin: newPin, pin: _profileEditPin }) });
       document.getElementById("edit-new-pin").value = "";
