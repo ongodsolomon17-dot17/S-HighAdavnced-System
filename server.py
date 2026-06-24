@@ -33,8 +33,9 @@ ALLOWED_ORIGINS = os.environ.get(
 
 CORS(app,
      origins=ALLOWED_ORIGINS,
-     methods=["GET", "POST", "PUT", "DELETE"],
-     allow_headers=["Content-Type", "Authorization", "X-Admin-Secret", "X-Device-FP"])
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-Admin-Secret", "X-Device-FP"],
+     supports_credentials=False)
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 DATABASE_URL      = os.environ.get("DATABASE_URL")
@@ -1052,80 +1053,73 @@ def forgot_password():
     if channel not in ("email", "phone", "whatsapp"):
         abort(400, description="'channel' must be 'email', 'phone', or 'whatsapp'.")
 
-    GENERIC_RESPONSE = jsonify({"ok": True, "message": "If this account exists, a code has been sent."})
+    GENERIC_OK = {"ok": True, "message": "If this account exists, a code has been sent."}
 
-    # Rate limit: at most 3 reset requests per email per hour. Checked
-    # before any account lookup and applied identically whether or not the
-    # account actually exists, so this can't be used to distinguish real
-    # accounts from fake ones via timing or response differences — and it
-    # caps how many times someone can be spammed with codes (now a real
-    # cost concern too, since phone/WhatsApp channels mean actual Twilio
-    # charges, not just an annoying inbox).
     conn = get_db()
-    c    = conn.cursor()
-    rate_key = f"{role}:{email}"
-    one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
-    c.execute(
-        "SELECT COUNT(*) AS n FROM reset_requests WHERE identifier=%s AND requested_at>%s",
-        (rate_key, one_hour_ago)
-    )
-    if c.fetchone()["n"] >= 3:
+    try:
+        c = conn.cursor()
+
+        # Rate-limit: max 3 reset requests per email per hour
+        rate_key     = f"{role}:{email}"
+        one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+        c.execute(
+            "SELECT COUNT(*) AS n FROM reset_requests WHERE identifier=%s AND requested_at>%s",
+            (rate_key, one_hour_ago)
+        )
+        if c.fetchone()["n"] >= 3:
+            conn.close()
+            abort(429, description="Too many reset requests. Please try again later.")
+        c.execute(
+            "INSERT INTO reset_requests (identifier, requested_at) VALUES (%s,%s)",
+            (rate_key, datetime.utcnow().isoformat())
+        )
+        c.execute("DELETE FROM reset_requests WHERE requested_at<%s",
+                  ((datetime.utcnow() - timedelta(days=1)).isoformat(),))
+        conn.commit()
+
+        # Look up account + phone number
+        if role == "staff":
+            c.execute("""
+                SELECT sa.id, st.phone
+                FROM   staff_accounts sa
+                LEFT JOIN staff st ON st.id=sa.staff_id AND st.user_id=sa.user_id
+                WHERE  sa.email=%s
+            """, (email,))
+        else:
+            c.execute("SELECT id, phone FROM users WHERE email=%s", (email,))
+        user = c.fetchone()
+
+        if not user:
+            return jsonify(GENERIC_OK)
+
+        # Generate 6-digit code
+        code    = "".join(random.choices(string.digits, k=6))
+        expires = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+
+        c.execute("DELETE FROM password_resets WHERE email=%s AND role=%s", (email, role))
+        c.execute(
+            "INSERT INTO password_resets (email, role, code, expires_at) VALUES (%s,%s,%s,%s)",
+            (email, role, code, expires)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[FORGOT-PASSWORD] ERROR: {e}", flush=True)
+        raise
+    finally:
         conn.close()
-        abort(429, description="Too many reset requests for this email. Please try again later.")
-    c.execute(
-        "INSERT INTO reset_requests (identifier, requested_at) VALUES (%s,%s)",
-        (rate_key, datetime.utcnow().isoformat())
-    )
-    # Opportunistic cleanup of old log rows so this table doesn't grow forever
-    c.execute("DELETE FROM reset_requests WHERE requested_at<%s",
-              ((datetime.utcnow() - timedelta(days=1)).isoformat(),))
-    conn.commit()
 
-    # Check user exists (admin or staff account), and fetch their phone too
-    # — for staff, the phone lives on the `staff` directory row (entered by
-    # the admin), not on the staff's own login row.
-    if role == "staff":
-        c.execute("""
-            SELECT sa.id, st.phone
-            FROM staff_accounts sa
-            LEFT JOIN staff st ON st.id=sa.staff_id AND st.user_id=sa.user_id
-            WHERE sa.email=%s
-        """, (email,))
-    else:
-        c.execute("SELECT id, phone FROM users WHERE email=%s", (email,))
-    user = c.fetchone()
-
-    if not user:
-        conn.close()
-        # Same generic response whether or not the account exists, so this
-        # endpoint can't be used to enumerate accounts.
-        return GENERIC_RESPONSE
-
-    # Generate 6-digit code
-    code    = "".join(random.choices(string.digits, k=6))
-    expires = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
-
-    # Delete any old unused codes for this email
-    c.execute("DELETE FROM password_resets WHERE email=%s AND role=%s", (email, role))
-    c.execute(
-        "INSERT INTO password_resets (email, role, code, expires_at) VALUES (%s,%s,%s,%s)",
-        (email, role, code, expires)
-    )
-    conn.commit()
-    conn.close()
-
+    # Deliver the code via the requested channel
     if channel == "phone" and user.get("phone"):
-        send_sms(user["phone"], f"Your S Advanced Attendance reset code is {code}. It expires in 10 minutes.")
+        send_sms(user["phone"],
+                 f"Your S Advanced Attendance reset code is {code}. It expires in 10 minutes.")
     elif channel == "whatsapp" and user.get("phone"):
-        send_whatsapp(user["phone"], f"Your S Advanced Attendance reset code is *{code}*. It expires in 10 minutes.")
+        send_whatsapp(user["phone"],
+                      f"Your S Advanced Attendance reset code is *{code}*. It expires in 10 minutes.")
     else:
-        # Either email was requested, or phone/whatsapp was requested but
-        # there's no phone number on file for this account — fall back to
-        # email so the code always actually reaches them somewhere. The
-        # response is identical either way, so this fallback can't be used
-        # to probe whether a phone number exists on the account.
-        html = f"""
-        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0f204a;color:#eef4ff;border-radius:16px">
+        # Email requested, or phone/WhatsApp requested but no number on file
+        email_body = f"""
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;
+                    background:#0f204a;color:#eef4ff;border-radius:16px">
           <h2 style="color:#3fc1c9;margin-bottom:8px">Password Reset</h2>
           <p style="color:#bfc9e3">Your verification code is:</p>
           <div style="font-size:42px;font-weight:800;letter-spacing:12px;text-align:center;
@@ -1136,9 +1130,9 @@ def forgot_password():
           <p style="color:#bfc9e3;font-size:13px">If you didn't request this, ignore this email.</p>
         </div>
         """
-        send_email(email, "Your Password Reset Code — S Advanced Attendance", html)
+        send_email(email, "Your Password Reset Code — S Advanced Attendance", email_body)
 
-    return GENERIC_RESPONSE
+    return jsonify(GENERIC_OK)
 
 
 @app.route("/auth/reset-password", methods=["POST"])
