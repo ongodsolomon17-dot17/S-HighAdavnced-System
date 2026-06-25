@@ -2252,20 +2252,36 @@ def trust_device():
     now = datetime.utcnow().isoformat()
     conn = get_db()
     c    = conn.cursor()
-    # Check max_devices limit for admins
+
+    # Check max_devices limit — but exclude the current fingerprint from the
+    # count. Re-trusting the same device (e.g. after a revoke/re-add) must
+    # not count against the limit, and an ON CONFLICT UPDATE on an existing
+    # row doesn't increase the count anyway.
     c.execute("SELECT max_devices FROM users WHERE id=%s", (current["sub"],))
-    u = c.fetchone()
+    u     = c.fetchone()
     max_d = u["max_devices"] if u else 3
-    c.execute("SELECT COUNT(*) AS n FROM trusted_devices WHERE user_id=%s AND role='admin' AND status='trusted'", (current["sub"],))
+    c.execute("""
+        SELECT COUNT(*) AS n FROM trusted_devices
+        WHERE user_id=%s AND role='admin' AND status='trusted'
+        AND device_fingerprint != %s
+    """, (current["sub"], fingerprint))
     cur_count = c.fetchone()["n"]
     if cur_count >= max_d:
         conn.close()
         abort(400, description=f"Max trusted devices limit ({max_d}) reached. Revoke an existing device first.")
+
+    # Admin rows have staff_id=NULL. Postgres treats NULL!=NULL in UNIQUE
+    # constraints, so a plain ON CONFLICT (user_id, role, staff_id,
+    # device_fingerprint) would never match an admin row and would insert a
+    # duplicate instead of updating. Use a partial index conflict target
+    # that only applies to admin rows (WHERE staff_id IS NULL).
     c.execute("""
         INSERT INTO trusted_devices
-        (user_id, role, device_fingerprint, device_name, created_at, last_used, expires_at, status)
-        VALUES (%s,'admin',%s,%s,%s,%s,NULL,'trusted')
+        (user_id, role, staff_id, device_fingerprint, device_name,
+         created_at, last_used, expires_at, status)
+        VALUES (%s, 'admin', NULL, %s, %s, %s, %s, NULL, 'trusted')
         ON CONFLICT (user_id, role, device_fingerprint)
+        WHERE staff_id IS NULL
         DO UPDATE SET last_used=%s, device_name=%s, status='trusted'
     """, (current["sub"], fingerprint, device_name, now, now, now, device_name))
     conn.commit()

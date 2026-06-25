@@ -46,61 +46,93 @@ function hideSplash() {
 hideSplash();
 
 // ===== Sound Engine =========================================================
+// ===== Sound Engine =========================================================
+// Named tone presets. Each entry: [freq, waveType, volume, duration, label]
+const TONE_PRESETS = {
+  success: [
+    { id: "chime",    label: "Chime",      freq: 880,  wave: "sine",     vol: 0.18, dur: 0.18 },
+    { id: "bright",   label: "Bright",     freq: 1046, wave: "sine",     vol: 0.16, dur: 0.20 },
+    { id: "soft",     label: "Soft",       freq: 784,  wave: "triangle", vol: 0.20, dur: 0.16 },
+    { id: "high",     label: "High",       freq: 1174, wave: "sine",     vol: 0.15, dur: 0.22 },
+    { id: "warm",     label: "Warm",       freq: 988,  wave: "triangle", vol: 0.18, dur: 0.18 },
+    { id: "crisp",    label: "Crisp",      freq: 1318, wave: "sine",     vol: 0.14, dur: 0.24 },
+    { id: "notify",   label: "Device notification", freq: null, wave: null, vol: null, dur: null },
+  ],
+  fail: [
+    { id: "buzz",     label: "Buzz",       freq: 220,  wave: "sawtooth", vol: 0.20, dur: 0.25 },
+    { id: "low",      label: "Low",        freq: 180,  wave: "square",   vol: 0.15, dur: 0.22 },
+    { id: "drone",    label: "Drone",      freq: 196,  wave: "sawtooth", vol: 0.18, dur: 0.24 },
+    { id: "deep",     label: "Deep",       freq: 165,  wave: "square",   vol: 0.20, dur: 0.20 },
+    { id: "harsh",    label: "Harsh",      freq: 207,  wave: "sawtooth", vol: 0.16, dur: 0.28 },
+    { id: "flat",     label: "Flat",       freq: 174,  wave: "square",   vol: 0.18, dur: 0.22 },
+    { id: "notify",   label: "Device notification", freq: null, wave: null, vol: null, dur: null },
+  ],
+};
+
 const SoundEngine = {
   ctx: null,
   enabled: true,
   staffMuted: false,
+  // Which tone ID is selected for each type, persisted in localStorage
+  selectedSuccess: localStorage.getItem("tone_success") || "chime",
+  selectedFail:    localStorage.getItem("tone_fail")    || "buzz",
 
   init() {
     try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
   },
 
-  _play(type, idx) {
-    if (!this.ctx || !this.enabled || this.staffMuted) return;
-    // Resume context if suspended (autoplay policy)
-    if (this.ctx.state === "suspended") this.ctx.resume();
+  async _playNotify() {
+    // Use the Web Notifications API to fire the real device notification
+    // sound — the only browser-exposed way to play a system sound.
+    if (Notification.permission === "default") await Notification.requestPermission();
+    if (Notification.permission !== "granted") return;
+    const n = new Notification("S Advanced Attendance", {
+      body: "Check-in event",
+      silent: false,
+      tag: "attendance-sound"  // reuse same tag so it doesn't stack
+    });
+    setTimeout(() => n.close(), 800);
+  },
 
+  _playTone(preset) {
+    if (!preset || !this.ctx) return;
+    if (this.ctx.state === "suspended") this.ctx.resume();
     const osc  = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.connect(gain);
     gain.connect(this.ctx.destination);
-
     const now = this.ctx.currentTime;
-    const successTones = [
-      [880, "sine", 0.18, 0.15],
-      [1046, "sine", 0.16, 0.18],
-      [784, "triangle", 0.2, 0.14],
-      [1174, "sine", 0.15, 0.2],
-      [988, "triangle", 0.18, 0.16],
-      [1318, "sine", 0.14, 0.22],
-    ];
-    const failTones = [
-      [220, "sawtooth", 0.2, 0.25],
-      [180, "square",   0.15, 0.2],
-      [196, "sawtooth", 0.18, 0.22],
-      [165, "square",   0.2, 0.18],
-      [207, "sawtooth", 0.16, 0.28],
-      [174, "square",   0.18, 0.2],
-    ];
-
-    const tones = type === "success" ? successTones : failTones;
-    const [freq, wave, vol, dur] = tones[idx % tones.length];
-    osc.type      = wave;
-    osc.frequency.setValueAtTime(freq, now);
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    osc.type = preset.wave;
+    osc.frequency.setValueAtTime(preset.freq, now);
+    gain.gain.setValueAtTime(preset.vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + preset.dur);
     osc.start(now);
-    osc.stop(now + dur);
+    osc.stop(now + preset.dur);
   },
 
-  success(idx = 0) { this._play("success", idx); },
-  fail(idx = 0)    { this._play("fail",    idx); },
+  _play(type, presetId) {
+    if (!this.enabled || this.staffMuted) return;
+    const id     = presetId || (type === "success" ? this.selectedSuccess : this.selectedFail);
+    const preset = TONE_PRESETS[type].find(t => t.id === id);
+    if (!preset) return;
+    if (preset.id === "notify") { this._playNotify(); return; }
+    this._playTone(preset);
+  },
+
+  success(idx) { this._play("success"); },
+  fail(idx)    { this._play("fail"); },
+
+  setTone(type, id) {
+    if (type === "success") this.selectedSuccess = id;
+    else                    this.selectedFail    = id;
+    localStorage.setItem(`tone_${type}`, id);
+  },
 };
 
 SoundEngine.init();
 
-function testSuccessSound() { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.success(Math.floor(Math.random()*6)); }
-function testFailSound()    { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.fail(Math.floor(Math.random()*6)); }
+function testSuccessSound() { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.success(); }
+function testFailSound()    { SoundEngine.enabled = true; SoundEngine.staffMuted = false; SoundEngine.fail(); }
 
 function toggleStaffMute() {
   SoundEngine.staffMuted = !SoundEngine.staffMuted;
@@ -634,9 +666,16 @@ async function checkDeviceTrust() {
 async function trustThisDevice() {
   try {
     await apiFetch("/devices/trust", { method: "POST", body: JSON.stringify({ fingerprint: getDeviceFingerprint(), device_name: getDeviceName() }) });
-    showToast("Device trusted!", "success");
-  } catch (err) { showToast(err.message, "error"); }
-  closeModal(); _pendingDeviceTrust = false;
+    showToast("✅ Device trusted!", "success");
+    closeModal();
+    _pendingDeviceTrust = false;
+  } catch (err) {
+    // Keep the modal open so the admin can see the error and act on it
+    // (e.g. revoke an old device first if the limit is hit).
+    const errEl = document.getElementById("device-modal-error");
+    if (errEl) { errEl.textContent = "⚠️ " + err.message; errEl.classList.remove("hidden"); }
+    else showToast(err.message, "error");
+  }
 }
 
 async function loadDevices() {
@@ -1014,6 +1053,17 @@ async function loadSettingsData() {
     document.getElementById("sound-enabled").checked = soundOn;
     document.getElementById("sound-enabled-label").textContent = soundOn ? "Sounds On 🔊" : "Sounds Off";
     SoundEngine.enabled = soundOn;
+
+    // Populate tone picker dropdowns and restore saved selections
+    ["success", "fail"].forEach(type => {
+      const sel = document.getElementById(`tone-${type}-select`);
+      if (!sel) return;
+      sel.innerHTML = TONE_PRESETS[type].map(t =>
+        `<option value="${t.id}">${t.label}</option>`
+      ).join("");
+      sel.value = type === "success" ? SoundEngine.selectedSuccess : SoundEngine.selectedFail;
+    });
+
     document.getElementById("max-devices").value = profile.max_devices || 3;
     if (profile.profile_picture) applyBranding(profile.profile_picture);
   } catch (_) {}
@@ -1481,6 +1531,11 @@ function closeModal() {
 function openModal(id) {
   document.getElementById("modal-overlay").classList.remove("hidden");
   document.getElementById(id).classList.remove("hidden");
+  // Clear any previous error message in the device-trust modal
+  if (id === "device-modal") {
+    const errEl = document.getElementById("device-modal-error");
+    if (errEl) { errEl.textContent = ""; errEl.classList.add("hidden"); }
+  }
 }
 document.getElementById("modal-overlay").addEventListener("click", e => {
   const pinOpen     = !document.getElementById("pin-modal").classList.contains("hidden");

@@ -657,10 +657,25 @@
             </label>
             <span id="sound-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">Sounds Off</span>
           </div>
-          <div class="button-row" style="margin-top:8px">
-            <button class="secondary" onclick="testSuccessSound()">▶ Test Success Sound</button>
-            <button class="secondary" onclick="testFailSound()">▶ Test Fail Sound</button>
+
+          <!-- Tone pickers -->
+          <div style="display:grid;gap:12px;margin-top:8px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label style="font-size:13px;color:var(--text-muted);font-weight:600;min-width:110px">✅ Success tone</label>
+              <select id="tone-success-select" onchange="SoundEngine.setTone('success', this.value)"
+                style="flex:1;padding:7px 10px;border-radius:10px;font-size:13px;background:var(--glass);border:1px solid var(--glass-border);color:var(--text)">
+              </select>
+              <button class="secondary" onclick="testSuccessSound()" style="white-space:nowrap;padding:7px 12px;font-size:12px">▶ Preview</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label style="font-size:13px;color:var(--text-muted);font-weight:600;min-width:110px">❌ Fail tone</label>
+              <select id="tone-fail-select" onchange="SoundEngine.setTone('fail', this.value)"
+                style="flex:1;padding:7px 10px;border-radius:10px;font-size:13px;background:var(--glass);border:1px solid var(--glass-border);color:var(--text)">
+              </select>
+              <button class="secondary" onclick="testFailSound()" style="white-space:nowrap;padding:7px 12px;font-size:12px">▶ Preview</button>
+            </div>
           </div>
+          <p class="hint" style="margin-top:10px">The "Device notification" option plays your device's system notification sound (requires notification permission).</p>
         </article>
 
         <!-- Max Trusted Devices -->
@@ -799,7 +814,8 @@
 <!-- ══════ DEVICE TRUST ══════ -->
 <div id="device-modal" class="modal hidden">
   <div class="modal-header"><h3>🔒 New Device Detected</h3></div>
-  <p class="hint" style="margin-bottom:16px">This device hasn't been verified before. Trust it for 30 days?</p>
+  <p class="hint" style="margin-bottom:16px">This device hasn't been verified before. Trust it to continue?</p>
+  <p id="device-modal-error" class="hidden" style="color:var(--danger);font-size:13px;margin-bottom:12px;font-weight:600"></p>
   <div class="modal-actions">
     <button class="primary"   onclick="trustThisDevice()">✅ Trust This Device</button>
     <button class="secondary" onclick="closeModal()">Not Now</button>
