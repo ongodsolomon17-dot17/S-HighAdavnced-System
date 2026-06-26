@@ -186,7 +186,7 @@ _GLOBAL_FP = "__global__"
 def _get_lockout_record(conn, identifier: str, device_fp: str):
     c = conn.cursor()
     c.execute(
-        "SELECT * FROM login_attempts WHERE identifier=%s AND device_fp=%s",
+        "SELECT * FROM login_attemps WHERE identifier=%s AND device_fp=%s",
         (identifier, device_fp)
     )
     return c.fetchone()
@@ -198,7 +198,7 @@ def check_login_lockout(identifier: str, device_fp: str):
     c    = conn.cursor()
     now  = datetime.utcnow().isoformat()
     c.execute(
-        "SELECT locked_until FROM login_attempts WHERE identifier=%s AND device_fp IN (%s,%s)",
+        "SELECT locked_until FROM login_attemps WHERE identifier=%s AND device_fp IN (%s,%s)",
         (identifier, device_fp, _GLOBAL_FP)
     )
     recs = c.fetchall()
@@ -218,14 +218,14 @@ def _bump_attempt(identifier: str, device_fp: str) -> int:
     c    = conn.cursor()
     now  = datetime.utcnow()
     c.execute(
-        "SELECT id, attempt_count, locked_until, escalation FROM login_attempts WHERE identifier=%s AND device_fp=%s",
+        "SELECT id, attempt_count, locked_until, escalation FROM login_attemps WHERE identifier=%s AND device_fp=%s",
         (identifier, device_fp)
     )
     rec = c.fetchone()
 
     if not rec:
         c.execute(
-            "INSERT INTO login_attempts (identifier, device_fp, attempt_count, last_attempt) VALUES (%s,%s,1,%s)",
+            "INSERT INTO login_attemps (identifier, device_fp, attempt_count, last_attempt) VALUES (%s,%s,1,%s)",
             (identifier, device_fp, now.isoformat())
         )
         conn.commit(); conn.close()
@@ -240,14 +240,14 @@ def _bump_attempt(identifier: str, device_fp: str) -> int:
         locked_until = (now + timedelta(hours=hours)).isoformat()
         new_escalation = min(escalation + 1, len(_LOCKOUT_HOURS))
         c.execute(
-            """UPDATE login_attempts
+            """UPDATE login_attemps
                SET attempt_count=%s, locked_until=%s, escalation=%s, last_attempt=%s
                WHERE id=%s""",
             (new_count, locked_until, new_escalation, now.isoformat(), rec["id"])
         )
     else:
         c.execute(
-            "UPDATE login_attempts SET attempt_count=%s, last_attempt=%s WHERE id=%s",
+            "UPDATE login_attemps SET attempt_count=%s, last_attempt=%s WHERE id=%s",
             (new_count, now.isoformat(), rec["id"])
         )
 
@@ -267,7 +267,7 @@ def record_successful_login(identifier: str, device_fp: str):
     conn = get_db()
     c    = conn.cursor()
     c.execute(
-        """UPDATE login_attempts SET attempt_count=0, locked_until=NULL, last_attempt=%s
+        """UPDATE login_attemps SET attempt_count=0, locked_until=NULL, last_attempt=%s
            WHERE identifier=%s AND device_fp IN (%s,%s)""",
         (datetime.utcnow().isoformat(), identifier, device_fp, _GLOBAL_FP)
     )
@@ -581,7 +581,7 @@ def init_db():
     """)
 
     c.execute("""
-        CREATE TABLE IF NOT EXISTS external_integrations (
+        CREATE TABLE IF NOT EXISTS external_intergrations (
             id          SERIAL  PRIMARY KEY,
             user_id     INTEGER NOT NULL UNIQUE,
             type        TEXT    NOT NULL,
@@ -622,7 +622,7 @@ def init_db():
     """)
 
     c.execute("""
-        CREATE TABLE IF NOT EXISTS login_attempts (
+        CREATE TABLE IF NOT EXISTS login_attemps (
             id              SERIAL PRIMARY KEY,
             identifier      TEXT NOT NULL,
             device_fp       TEXT NOT NULL DEFAULT '',
@@ -670,7 +670,10 @@ def init_db():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_reset_requests_identifier ON reset_requests(identifier)")
 
-    # Migrations for existing tables
+    # Migrations for existing tables — each runs and commits independently
+    # so a failure on one column doesn't silently prevent the rest from
+    # being applied (the old pattern caught exceptions and rolled back but
+    # never committed, so successful ALTERs were also never persisted).
     migrations = [
         ("password_resets", "attempts",     "INTEGER NOT NULL DEFAULT 0"),
         ("users", "geofence_lat",    "DOUBLE PRECISION"),
@@ -694,8 +697,10 @@ def init_db():
     for table, col, definition in migrations:
         try:
             c.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {definition}")
-        except Exception:
+            conn.commit()
+        except Exception as e:
             conn.rollback()
+            print(f"[MIGRATION] Warning: could not add {table}.{col}: {e}", flush=True)
 
     # Fix: original UNIQUE constraint predates staff_id, so two different
     # staff members sharing the same fingerprint (same phone model, same
@@ -1776,7 +1781,7 @@ def get_integration():
         abort(403, description="Admin only.")
     conn = get_db()
     c    = conn.cursor()
-    c.execute("SELECT type, config, created_at FROM external_integrations WHERE user_id=%s", (current["sub"],))
+    c.execute("SELECT type, config, created_at FROM external_intergrations WHERE user_id=%s", (current["sub"],))
     row = c.fetchone()
     conn.close()
     if not row:
@@ -1802,7 +1807,7 @@ def save_integration():
     conn = get_db()
     c    = conn.cursor()
     c.execute("""
-        INSERT INTO external_integrations (user_id, type, config, created_at)
+        INSERT INTO external_intergrations (user_id, type, config, created_at)
         VALUES (%s,%s,%s,%s)
         ON CONFLICT (user_id) DO UPDATE SET type=EXCLUDED.type, config=EXCLUDED.config, created_at=EXCLUDED.created_at
     """, (current["sub"], itype, config_str, created))
@@ -1818,7 +1823,7 @@ def delete_integration():
         abort(403, description="Admin only.")
     conn = get_db()
     c    = conn.cursor()
-    c.execute("DELETE FROM external_integrations WHERE user_id=%s", (current["sub"],))
+    c.execute("DELETE FROM external_intergrations WHERE user_id=%s", (current["sub"],))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -1832,7 +1837,7 @@ def push_to_integration():
     import urllib.request, urllib.error
     conn = get_db()
     c    = conn.cursor()
-    c.execute("SELECT type, config FROM external_integrations WHERE user_id=%s", (current["sub"],))
+    c.execute("SELECT type, config FROM external_intergrations WHERE user_id=%s", (current["sub"],))
     row = c.fetchone()
     if not row:
         conn.close()
@@ -1962,13 +1967,13 @@ def superadmin_delete_user(user_id):
         c.execute("DELETE FROM attendance            WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM staff_accounts        WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM staff                 WHERE user_id=%s", (user_id,))
-        c.execute("DELETE FROM external_integrations WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM external_intergrations WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM trusted_devices       WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM pin_attempts          WHERE user_id=%s", (user_id,))
         # Free up the email's lockout history so a future account that
         # re-registers with this same address doesn't inherit a stranger's
         # failed-login lockout state.
-        c.execute("DELETE FROM login_attempts WHERE identifier=%s", (user_row["email"],))
+        c.execute("DELETE FROM login_attemps WHERE identifier=%s", (user_row["email"],))
         c.execute("DELETE FROM users                 WHERE id=%s",      (user_id,))
         conn.commit()
     finally:
@@ -2397,7 +2402,7 @@ def revoke_device(device_id):
 # ===== Health ===============================================================
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat(), "v": "2.0-brevo-cors"})
 
 @app.route("/ping", methods=["GET"])
 def ping():
