@@ -49,23 +49,20 @@ if not SUPERADMIN_SECRET:
         "SUPERADMIN_SECRET environment variable is not set. "
         "Refusing to start with a guessable default for an endpoint that can delete any company's account."
     )
-RESEND_API_KEY    = os.environ.get("RESEND_API_KEY",    "")
-FROM_EMAIL        = os.environ.get("FROM_EMAIL",        "onboarding@resend.dev")
-# SMS (Twilio) — used for the "send reset code via phone" option. Sign up at
-# twilio.com to get these three values; if unset, the phone channel just
-# silently fails server-side (forgot-password still returns its normal
-# generic response either way, so this doesn't change the API's behavior
-# from the outside — it just means no SMS actually goes out).
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN",  "")
-TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
-# WhatsApp uses the same Twilio account/token, but needs its own
-# WhatsApp-approved sender. Twilio's shared sandbox number
-# (whatsapp:+14155238886) works for testing without any extra setup —
-# just put "+14155238886" here while testing, and recipients must first
-# send your sandbox join code to that number once. For production you'd
-# apply for your own WhatsApp Business sender through Twilio.
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
+BREVO_API_KEY     = os.environ.get("BREVO_API_KEY",     "")
+FROM_EMAIL        = os.environ.get("FROM_EMAIL",        "")  # must be a verified sender in your Brevo account
+# SMS + WhatsApp (Vonage) — used for the phone/WhatsApp reset code channels.
+# Sign up at dashboard.vonage.com to get VONAGE_API_KEY and VONAGE_API_SECRET.
+# VONAGE_FROM_NUMBER: the virtual number you buy in the Vonage dashboard
+#   (format: digits only, no +, e.g. "447700900000"). Used for SMS.
+# VONAGE_WHATSAPP_FROM: your WhatsApp Business number or Vonage sandbox
+#   number (format: digits only). For testing use the Vonage sandbox number
+#   shown in your dashboard under Messages → Sandbox.
+# If any of these are unset, that channel silently falls back to email.
+VONAGE_API_KEY        = os.environ.get("VONAGE_API_KEY",        "")
+VONAGE_API_SECRET     = os.environ.get("VONAGE_API_SECRET",     "")
+VONAGE_FROM_NUMBER    = os.environ.get("VONAGE_FROM_NUMBER",    "")
+VONAGE_WHATSAPP_FROM  = os.environ.get("VONAGE_WHATSAPP_FROM",  "")
 
 # ── Input constraints ──────────────────────────────────────────────────────
 MAX_NAME_LEN     = 80
@@ -395,71 +392,120 @@ def validate_webhook_url(url: str) -> str:
 def too_many_requests(e): return jsonify({"error": str(e.description)}), 429
 
 
-# ===== Email (Resend) =======================================================
+# ===== Email (Brevo) =========================================================
 def send_email(to: str, subject: str, html: str) -> bool:
-    if not RESEND_API_KEY:
-        print("[EMAIL] ERROR: RESEND_API_KEY is not set.", flush=True)
+    """Send a transactional email via Brevo's API (free tier: 300/day, no card).
+    Requires BREVO_API_KEY and FROM_EMAIL (a sender verified in your Brevo account)."""
+    if not BREVO_API_KEY:
+        print("[EMAIL] ERROR: BREVO_API_KEY is not set.", flush=True)
+        return False
+    if not FROM_EMAIL:
+        print("[EMAIL] ERROR: FROM_EMAIL is not set.", flush=True)
         return False
     try:
-        import resend
-        resend.api_key = RESEND_API_KEY
-        params = {
-            "from":    FROM_EMAIL,
-            "to":      [to],
-            "subject": subject,
-            "html":    html
-        }
-        result = resend.Emails.send(params)
-        print(f"[EMAIL] Sent to {to} — result: {result}", flush=True)
-        return True
+        payload = json.dumps({
+            "sender":      {"email": FROM_EMAIL},
+            "to":          [{"email": to}],
+            "subject":     subject,
+            "htmlContent": html,
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept":       "application/json",
+                "api-key":      BREVO_API_KEY,
+            }
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ok = 200 <= resp.status < 300
+            print(f"[EMAIL] {'Sent' if ok else 'Failed'} to {to} — status {resp.status}", flush=True)
+            return ok
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        print(f"[EMAIL] HTTP {e.code}: {body}", flush=True)
+        return False
     except Exception as e:
         print(f"[EMAIL] ERROR sending to {to}: {e}", flush=True)
         return False
 
 
-# ===== SMS / WhatsApp (Twilio) ===============================================
-def _twilio_send(from_number: str, to_number: str, body: str, label: str) -> bool:
-    """Shared Twilio Messages API call, used by both send_sms() and
-    send_whatsapp() — they only differ in which from/to numbers get used."""
-    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and from_number):
-        print(f"[{label}] ERROR: Twilio credentials/sender are not set.", flush=True)
+# ===== SMS / WhatsApp (Vonage) ===============================================
+def send_sms(to: str, message: str) -> bool:
+    """Send a plain-text SMS via Vonage's SMS REST API.
+    Requires VONAGE_API_KEY, VONAGE_API_SECRET and VONAGE_FROM_NUMBER."""
+    if not (VONAGE_API_KEY and VONAGE_API_SECRET and VONAGE_FROM_NUMBER):
+        print("[SMS] ERROR: Vonage credentials are not fully set.", flush=True)
         return False
     try:
-        url     = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
         payload = urllib.parse.urlencode({
-            "From": from_number,
-            "To":   to_number,
-            "Body": body
+            "api_key":    VONAGE_API_KEY,
+            "api_secret": VONAGE_API_SECRET,
+            "from":       VONAGE_FROM_NUMBER,
+            "to":         to.lstrip("+"),   # Vonage expects digits only, no +
+            "text":       message,
+            "type":       "text",
         }).encode()
-        creds = base64.b64encode(f"{TWILIO_ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}".encode()).decode()
-        req = urllib.request.Request(url, data=payload, headers={
-            "Authorization": f"Basic {creds}",
-            "Content-Type":  "application/x-www-form-urlencoded"
-        })
+        req = urllib.request.Request(
+            "https://rest.nexmo.com/sms/json",
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            ok = 200 <= resp.status < 300
-            print(f"[{label}] Sent to {to_number} — status {resp.status}", flush=True)
+            result = json.loads(resp.read())
+            msgs   = result.get("messages", [])
+            ok     = bool(msgs) and msgs[0].get("status") == "0"
+            if not ok:
+                print(f"[SMS] Vonage error: {msgs[0].get('error-text', 'unknown')}", flush=True)
+            else:
+                print(f"[SMS] Sent to {to}", flush=True)
             return ok
     except Exception as e:
-        print(f"[{label}] ERROR sending to {to_number}: {e}", flush=True)
+        print(f"[SMS] ERROR: {e}", flush=True)
         return False
 
-def send_sms(to: str, message: str) -> bool:
-    """Send a plain-text SMS via Twilio's REST API. Requires TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER to be set as env vars (sign up at
-    twilio.com). Swap this implementation if you'd rather use a different
-    provider (e.g. Termii, Africa's Talking) — only this function needs to
-    change, every caller just expects a bool back."""
-    return _twilio_send(TWILIO_FROM_NUMBER, to, message, "SMS")
 
 def send_whatsapp(to: str, message: str) -> bool:
-    """Send a WhatsApp message via Twilio. Requires TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_FROM (a WhatsApp-approved Twilio
-    sender — their shared sandbox number works for testing). Twilio's API
-    requires both numbers to be prefixed with "whatsapp:"."""
-    from_number = f"whatsapp:{TWILIO_WHATSAPP_FROM}" if TWILIO_WHATSAPP_FROM else ""
-    to_number   = to if to.startswith("whatsapp:") else f"whatsapp:{to}"
-    return _twilio_send(from_number, to_number, message, "WHATSAPP")
+    """Send a WhatsApp message via Vonage's Messages API.
+    Requires VONAGE_API_KEY, VONAGE_API_SECRET and VONAGE_WHATSAPP_FROM.
+    For testing, use the Vonage sandbox (dashboard → Messages → Sandbox)
+    and have recipients send the sandbox join keyword first."""
+    if not (VONAGE_API_KEY and VONAGE_API_SECRET and VONAGE_WHATSAPP_FROM):
+        print("[WHATSAPP] ERROR: Vonage credentials are not fully set.", flush=True)
+        return False
+    try:
+        # Vonage Messages API uses Basic auth with api_key:api_secret
+        creds   = base64.b64encode(
+            f"{VONAGE_API_KEY}:{VONAGE_API_SECRET}".encode()
+        ).decode()
+        payload = json.dumps({
+            "from":         VONAGE_WHATSAPP_FROM.lstrip("+"),
+            "to":           to.lstrip("+"),
+            "channel":      "whatsapp",
+            "message_type": "text",
+            "text":         message,
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.nexmo.com/v1/messages",
+            data=payload,
+            headers={
+                "Content-Type":  "application/json",
+                "Accept":        "application/json",
+                "Authorization": f"Basic {creds}",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ok = 200 <= resp.status < 300
+            print(f"[WHATSAPP] {'Sent' if ok else 'Failed'} to {to} — status {resp.status}", flush=True)
+            return ok
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        print(f"[WHATSAPP] HTTP {e.code}: {body}", flush=True)
+        return False
+    except Exception as e:
+        print(f"[WHATSAPP] ERROR: {e}", flush=True)
+        return False
 
 
 

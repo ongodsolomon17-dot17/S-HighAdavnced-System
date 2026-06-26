@@ -14,25 +14,27 @@ services:
         sync: false          # Set this manually in Render dashboard
       - key: ALLOWED_ORIGINS
         value: https://s-high-adavnced-system.vercel.app  # update if your Vercel URL differs
-      # Required for ANY email to send — password reset codes, feedback
-      # notifications, etc. Sign up at resend.com to get this.
-      - key: RESEND_API_KEY
+      # Required for email to work (password resets, etc).
+      # Sign up FREE at brevo.com — 300 emails/day, no credit card needed.
+      # Get your API key from: Brevo dashboard → your name → SMTP & API → API Keys
+      - key: BREVO_API_KEY
         sync: false
-      # Optional — the address emails are sent FROM. Defaults to Resend's
-      # shared test address (onboarding@resend.dev), which works but looks
-      # unprofessional and has sending limits. Verify your own domain on
-      # Resend and put a real address here for production use.
+      # The email address you'll send FROM — must be verified in your Brevo
+      # account first (Brevo dashboard → Senders & IPs → Add a sender).
+      # Use your own email address e.g. yourname@gmail.com
       - key: FROM_EMAIL
-        value: onboarding@resend.dev
+        sync: false
       # Optional — only needed if you want the "send reset code via Phone"
       # and/or "WhatsApp" options to actually deliver. Without these, both
       # options silently fall back to emailing the code instead (the app
-      # keeps working either way). Sign up at twilio.com to get these.
-      - key: TWILIO_ACCOUNT_SID
+      # keeps working either way). Sign up at dashboard.vonage.com to get
+      # your API key and secret. Buy a virtual number there for SMS, and
+      # use the Vonage sandbox number for WhatsApp testing.
+      - key: VONAGE_API_KEY         # found on your Vonage dashboard homepage
         sync: false
-      - key: TWILIO_AUTH_TOKEN
+      - key: VONAGE_API_SECRET      # found on your Vonage dashboard homepage
         sync: false
-      - key: TWILIO_FROM_NUMBER       # regular SMS sender number
+      - key: VONAGE_FROM_NUMBER     # virtual number you buy in Vonage (digits only, no +)
         sync: false
-      - key: TWILIO_WHATSAPP_FROM     # WhatsApp-approved sender (Twilio's
-        sync: false                  # sandbox number "+14155238886" works for testing)
+      - key: VONAGE_WHATSAPP_FROM   # WhatsApp sender (Vonage sandbox number for testing)
+        sync: false
