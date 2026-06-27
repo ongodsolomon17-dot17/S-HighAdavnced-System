@@ -80,6 +80,11 @@ const ActionOverlay = {
   // usage: await ActionOverlay.run("Checking in...", () => apiFetch(...))
   async run(label, fn) {
     if (!this._el) this.init();
+    // If individual child elements are still null (timing edge case where
+    // init ran before full DOM parse), try grabbing them now
+    if (!this._label) this._label = document.getElementById("ao-label");
+    if (!this._ok)    this._ok    = document.getElementById("ao-success");
+    if (!this._fail)  this._fail  = document.getElementById("ao-fail");
     // If the overlay element still doesn't exist in the DOM (e.g. old
     // index.html is cached on Vercel), skip the overlay entirely and
     // just run the function — no crash, no visual feedback until the
@@ -104,16 +109,24 @@ const ActionOverlay = {
   _resolve(success) {
     if (!this._el) return;
     const result = success ? this._ok : this._fail;
-    this._label.textContent = success ? "Done" : "Failed";
-    if (result) result.classList.add("show");
+    if (this._label) this._label.textContent = success ? "Done" : "Failed";
+    if (result) {
+      // Force animation replay: remove, trigger reflow, re-add
+      result.classList.remove("show");
+      void result.offsetWidth; // triggers reflow so CSS animation restarts
+      result.classList.add("show");
+    }
     const rings = this._el.querySelectorAll(".ao-ring, .ao-ring-2");
     rings.forEach(r => { r.style.opacity = "0"; r.style.transition = "opacity 0.2s"; });
-    this._timer = setTimeout(() => this._hide(), 1100);
+    this._timer = setTimeout(() => this._hide(), 1400);
   },
 
   _reset() {
     if (!this._el) return;
     [this._ok, this._fail].forEach(el => { if (el) el.classList.remove("show"); });
+    // Reset SVG paths to hidden state so animation replays cleanly next call
+    this._el.querySelectorAll(".ao-checkmark").forEach(el => el.style.strokeDashoffset = "80");
+    this._el.querySelectorAll(".ao-cross-a,.ao-cross-b").forEach(el => el.style.strokeDashoffset = "56");
     const rings = this._el.querySelectorAll(".ao-ring, .ao-ring-2");
     rings.forEach(r => { r.style.opacity = ""; r.style.transition = ""; });
   },
@@ -1367,7 +1380,7 @@ async function renderAttendanceTable() {
     const date = new Date(record.timestamp+"Z");
     const row  = document.createElement("tr");
     [date.toLocaleDateString(), record.name?`${record.staff_id} • ${record.name}`:record.staff_id,
-     record.action==="check_in"?"✅ Check In":"🚪 Check Out", date.toLocaleTimeString(), record.punctuality_grade||"—"
+     record.action==="check_in"?"Check In":"Check Out", date.toLocaleTimeString(), record.punctuality_grade||"—"
     ].forEach((val,i) => {
       const td = document.createElement("td");
       if (i===4 && record.punctuality_grade) td.innerHTML = gradeChip(record.punctuality_grade);
@@ -1485,7 +1498,7 @@ function renderReportTable(data) {
   data.forEach(r => {
     const date = new Date(r.timestamp+"Z");
     const row  = document.createElement("tr");
-    [date.toLocaleDateString(), r.staff_id, r.name||"—", r.action==="check_in"?"✅ Check In":"🚪 Check Out", date.toLocaleTimeString(), r.punctuality_grade||"—"].forEach((val,i) => {
+    [date.toLocaleDateString(), r.staff_id, r.name||"—", r.action==="check_in"?"Check In":"Check Out", date.toLocaleTimeString(), r.punctuality_grade||"—"].forEach((val,i) => {
       const td = document.createElement("td");
       if (i===5 && r.punctuality_grade) td.innerHTML = gradeChip(r.punctuality_grade);
       else td.textContent = val;
@@ -1564,7 +1577,7 @@ function renderViewAllTable(data) {
   data.forEach(r => {
     const date = new Date(r.timestamp+"Z");
     const row  = document.createElement("tr");
-    [date.toLocaleDateString(),r.staff_id,r.name||"—",r.action==="check_in"?"✅ Check In":"🚪 Check Out",date.toLocaleTimeString(),r.punctuality_grade||"—",r.lat?`${(+r.lat).toFixed(4)},${(+r.lng).toFixed(4)}`:"—"].forEach((val,i) => {
+    [date.toLocaleDateString(),r.staff_id,r.name||"—",r.action==="check_in"?"Check In":"Check Out",date.toLocaleTimeString(),r.punctuality_grade||"—",r.lat?`${(+r.lat).toFixed(4)},${(+r.lng).toFixed(4)}`:"—"].forEach((val,i) => {
       const td = document.createElement("td");
       if (i===5 && r.punctuality_grade) td.innerHTML = gradeChip(r.punctuality_grade);
       else td.textContent = val;
@@ -1634,7 +1647,7 @@ async function loadStaffSummary(period) {
     records.slice(0,30).forEach(r => {
       const date = new Date(r.timestamp+"Z");
       const row  = document.createElement("tr");
-      [date.toLocaleDateString(), r.action==="check_in"?"✅ Clock In":"🚪 Clock Out", date.toLocaleTimeString(), r.punctuality_grade||"—"].forEach((val,i) => {
+      [date.toLocaleDateString(), r.action==="check_in"?"Clock In":"Clock Out", date.toLocaleTimeString(), r.punctuality_grade||"—"].forEach((val,i) => {
         const td = document.createElement("td");
         if (i===3 && r.punctuality_grade) td.innerHTML = gradeChip(r.punctuality_grade);
         else td.textContent = val;
@@ -1662,7 +1675,7 @@ async function stopScanner() {
 
 async function startScan(type) {
   scanType = type;
-  document.getElementById("scanner-title").textContent = type==="check_in" ? "📷 Scan QR – Check In" : "📷 Scan QR – Check Out";
+  document.getElementById("scanner-title").textContent = type==="check_in" ? "Scan QR – Check In" : "Scan QR – Check Out";
   openModal("scanner-modal");
   document.getElementById("scanner-container").innerHTML = '<div id="qr-reader" style="width:100%"></div>';
   try {

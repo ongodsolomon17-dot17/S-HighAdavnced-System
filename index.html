@@ -35,6 +35,41 @@
   </div>
 </div>
 
+<!-- ══════ ACTION OVERLAY ══════
+     Shown during admin/staff commands (check-in, add/update/delete staff, etc.)
+     Avatar slot shows the user's profile logo instead of the S.
+     Resolves into a 3-D tick on success or X on fail, then fades out.
+══════════════════════════════ -->
+<div id="action-overlay">
+  <div class="ao-wrap">
+    <div class="ao-ring"></div>
+    <div class="ao-ring-2"></div>
+    <div class="ao-avatar" id="ao-avatar">S</div>
+    <div class="ao-result success" id="ao-success">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Outer circle -->
+        <circle cx="40" cy="40" r="36" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+        <!-- 3-D effect: inner circle -->
+        <circle cx="40" cy="40" r="28" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+        <!-- Checkmark -->
+        <polyline class="ao-checkmark" points="22,42 34,54 58,28"
+          stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+    </div>
+    <div class="ao-result fail" id="ao-fail">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="40" cy="40" r="36" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+        <circle cx="40" cy="40" r="28" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+        <line class="ao-cross-a" x1="26" y1="26" x2="54" y2="54"
+          stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+        <line class="ao-cross-b" x1="54" y1="26" x2="26" y2="54"
+          stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+  <div class="ao-label" id="ao-label">Processing…</div>
+</div>
+
 <!-- ══════ AUTH ══════ -->
 <div id="auth-shell" class="auth-shell hidden">
   <div class="auth-blobs">
@@ -53,8 +88,8 @@
     </div>
 
     <div class="auth-role-tabs">
-      <button class="role-tab active" id="rtab-admin" onclick="switchAuthMode('admin')">🏢 Admin</button>
-      <button class="role-tab"        id="rtab-staff" onclick="switchAuthMode('staff')">👤 Staff Portal</button>
+      <button class="role-tab active" id="rtab-admin" onclick="switchAuthMode('admin')"> Admin</button>
+      <button class="role-tab"        id="rtab-staff" onclick="switchAuthMode('staff')"> Staff Portal</button>
     </div>
 
     <!-- ADMIN PANEL -->
@@ -72,7 +107,7 @@
           <label>Password</label>
           <div class="input-eye">
             <input id="login-password" type="password" placeholder="Your password" autocomplete="current-password" />
-            <button type="button" class="eye-btn" onclick="toggleEye('login-password',this)">👁</button>
+            <button type="button" class="eye-btn" onclick="toggleEye('login-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
         </div>
         <button class="auth-submit" id="btn-login" onclick="handleLogin()">
@@ -99,7 +134,7 @@
           <label>Password <span class="req">*</span></label>
           <div class="input-eye">
             <input id="reg-password" type="password" maxlength="128" placeholder="Min 8 characters" autocomplete="new-password" />
-            <button type="button" class="eye-btn" onclick="toggleEye('reg-password',this)">👁</button>
+            <button type="button" class="eye-btn" onclick="toggleEye('reg-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
           <div class="pw-strength" id="pw-strength"></div>
         </div>
@@ -107,7 +142,7 @@
           <label>Confirm Password <span class="req">*</span></label>
           <div class="input-eye">
             <input id="reg-password2" type="password" maxlength="128" placeholder="Repeat password" />
-            <button type="button" class="eye-btn" onclick="toggleEye('reg-password2',this)">👁</button>
+            <button type="button" class="eye-btn" onclick="toggleEye('reg-password2',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
         </div>
         <div class="field-group">
@@ -135,7 +170,7 @@
           <label>Password</label>
           <div class="input-eye">
             <input id="slogin-password" type="password" placeholder="Your password" />
-            <button type="button" class="eye-btn" onclick="toggleEye('slogin-password',this)">👁</button>
+            <button type="button" class="eye-btn" onclick="toggleEye('slogin-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
         </div>
         <button class="auth-submit" id="btn-staff-login" onclick="handleStaffLogin()">
@@ -163,7 +198,7 @@
           <label>Password <span class="req">*</span></label>
           <div class="input-eye">
             <input id="sreg-password" type="password" maxlength="128" placeholder="Min 8 characters" />
-            <button type="button" class="eye-btn" onclick="toggleEye('sreg-password',this)">👁</button>
+            <button type="button" class="eye-btn" onclick="toggleEye('sreg-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
           </div>
         </div>
         <button class="auth-submit" id="btn-staff-register" onclick="handleStaffRegister()">
@@ -187,7 +222,7 @@
       </div>
     </div>
     <div class="header-actions">
-      <button id="staff-mute-btn" class="pill" onclick="toggleStaffMute()" title="Mute/unmute sounds">🔔</button>
+      <button id="staff-mute-btn" class="pill" onclick="toggleStaffMute()" title="Mute/unmute sounds"></button>
       <button class="danger-pill pill" onclick="confirmSignOut()">Sign Out</button>
     </div>
   </header>
@@ -214,13 +249,13 @@
       <div id="shift-selector" class="hidden" style="margin:12px 0">
         <label style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:6px;display:block">Select Shift</label>
         <div style="display:flex;gap:8px">
-          <button class="pill active" id="shift-btn-day"   onclick="selectShift('day')">☀️ Day Shift</button>
-          <button class="pill"        id="shift-btn-night" onclick="selectShift('night')">🌙 Night Shift</button>
+          <button class="pill active" id="shift-btn-day"   onclick="selectShift('day')">Day Shift</button>
+          <button class="pill"        id="shift-btn-night" onclick="selectShift('night')">Night Shift</button>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
-        <button class="primary"   id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">✅ Clock In</button>
-        <button class="secondary" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">🚪 Clock Out</button>
+        <button class="primary"   id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">Clock In</button>
+        <button class="secondary" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">Clock Out</button>
       </div>
     </article>
   </section>
@@ -361,12 +396,12 @@
             <div id="selected-staff-display" style="margin-top:8px;font-size:13px;color:var(--accent);font-weight:600;min-height:20px"></div>
           </div>
           <div class="button-row">
-            <button id="btn-scan-checkin"  class="accent">📷 Scan Check-In</button>
-            <button id="btn-scan-checkout" class="accent">📷 Scan Check-Out</button>
+            <button id="btn-scan-checkin"  class="accent"> Scan Check-In</button>
+            <button id="btn-scan-checkout" class="accent"> Scan Check-Out</button>
           </div>
           <div class="button-row" style="margin-top:8px">
-            <button id="btn-manual-checkin"  class="secondary">✅ Manual Check-In</button>
-            <button id="btn-manual-checkout" class="secondary">🚪 Manual Check-Out</button>
+            <button id="btn-manual-checkin"  class="secondary"> Manual Check-In</button>
+            <button id="btn-manual-checkout" class="secondary"> Manual Check-Out</button>
           </div>
           <p class="hint" id="admin-geo-status" style="margin-top:8px"></p>
         </article>
@@ -394,7 +429,7 @@
           <h2>Attendance Log</h2>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span id="attendance-count" class="tag">0 entries</span>
-            <button class="pill" onclick="openViewAll()">📋 View All</button>
+            <button class="pill" onclick="openViewAll()">View All</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -423,9 +458,9 @@
           </div>
         </div>
         <div class="button-row" style="margin-top:16px">
-          <button class="primary" onclick="generateReport()">📊 Generate</button>
-          <button class="accent"  onclick="exportExcel()">📥 Excel</button>
-          <button class="accent"  onclick="exportPDF()">📄 PDF</button>
+          <button class="primary" onclick="generateReport()">Generate</button>
+          <button class="accent"  onclick="exportExcel()">Excel</button>
+          <button class="accent"  onclick="exportPDF()">PDF</button>
         </div>
       </article>
       <article class="card wide-card">
@@ -486,7 +521,7 @@
     <!-- FEEDBACK -->
     <section id="tab-feedback" class="tab-panel hidden">
       <article class="card wide-card" style="max-width:600px;margin:0 auto">
-        <h2>💬 Send Feedback</h2>
+        <h2> Send Feedback</h2>
         <p class="hint">Share your thoughts or suggestions with the system developer.</p>
         <div class="form-grid" style="margin-top:16px">
           <label>Rating (optional)</label>
@@ -517,7 +552,7 @@
 
         <!-- Profile Picture -->
         <article class="card">
-          <h2>👤 Company Profile</h2>
+          <h2> Company Profile</h2>
           <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
             <div id="profile-pic-preview" style="width:72px;height:72px;border-radius:50%;
                  background:linear-gradient(135deg,#3fc1c9,#2c9ea1);display:flex;align-items:center;
@@ -533,7 +568,7 @@
                   <input type="file" id="profile-pic-input" accept="image/jpeg,image/png,image/webp"
                          style="display:none" onchange="handleProfilePicUpload(this)" />
                 </label>
-                <button class="secondary" onclick="removeProfilePic()">🗑 Remove</button>
+                <button class="secondary" onclick="removeProfilePic()">Remove</button>
               </div>
             </div>
           </div>
@@ -545,7 +580,7 @@
           <h2>✏️ Edit Profile</h2>
           <p class="hint">PIN verification required to unlock editing.</p>
           <div id="profile-edit-locked" style="margin-top:12px">
-            <button class="primary" onclick="unlockProfileEdit()">🔓 Unlock with PIN</button>
+            <button class="primary" onclick="unlockProfileEdit()">Unlock with PIN</button>
           </div>
           <div id="profile-edit-form" class="hidden">
             <div class="form-grid" style="margin-top:12px">
@@ -557,20 +592,20 @@
               <input id="edit-phone" type="tel" maxlength="30" />
             </div>
             <div class="button-row" style="margin-top:12px">
-              <button class="primary" onclick="saveProfileEdit()">💾 Save Changes</button>
+              <button class="primary" onclick="saveProfileEdit()">Save Changes</button>
             </div>
             <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
             <div class="form-grid">
               <label>New Password</label>
               <div class="input-eye">
                 <input id="edit-new-password" type="password" maxlength="128" placeholder="Leave blank to keep" />
-                <button type="button" class="eye-btn" onclick="toggleEye('edit-new-password',this)">👁</button>
+                <button type="button" class="eye-btn" onclick="toggleEye('edit-new-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
               </div>
               <label>New PIN</label>
               <input id="edit-new-pin" type="password" maxlength="4" placeholder="Leave blank to keep" inputmode="numeric" pattern="\d{4}" autocomplete="new-password" />
             </div>
             <div class="button-row" style="margin-top:12px">
-              <button class="accent" onclick="savePasswordPin()">🔑 Update Password/PIN</button>
+              <button class="accent" onclick="savePasswordPin()">Update Security</button>
             </div>
           </div>
           <p id="profile-edit-status" class="hint" style="margin-top:8px"></p>
@@ -594,11 +629,11 @@
               <label>Radius (metres)</label>  <input id="geo-radius" type="number" min="50" max="5000" value="200" />
             </div>
             <div class="button-row" style="margin-top:10px">
-              <button class="primary" onclick="detectMyLocation()">📡 Use My Location</button>
+              <button class="primary" onclick="detectMyLocation()">Use My Location</button>
             </div>
           </div>
           <div class="button-row" style="margin-top:12px">
-            <button class="accent" onclick="saveGeofence()">💾 Save Settings</button>
+            <button class="accent" onclick="saveGeofence()">Save Settings</button>
           </div>
           <p class="hint" id="geo-saved-status" style="margin-top:8px"></p>
         </article>
@@ -641,14 +676,14 @@
             </div>
           </div>
           <div class="button-row" style="margin-top:14px">
-            <button class="accent" onclick="saveSchedule()">💾 Save Schedule</button>
+            <button class="accent" onclick="saveSchedule()">Save Schedule</button>
           </div>
           <p class="hint" id="sched-status" style="margin-top:8px"></p>
         </article>
 
         <!-- Sound Settings -->
         <article class="card">
-          <h2>🔊 Sound Settings</h2>
+          <h2> Sound Settings</h2>
           <p class="hint">Enable tick/decline sounds for check-in events. Staff can mute from their portal.</p>
           <div style="display:flex;align-items:center;gap:12px;margin:14px 0">
             <label class="toggle-switch">
@@ -687,7 +722,7 @@
             <input id="max-devices" type="number" min="1" max="5" value="3" style="max-width:80px" />
           </div>
           <div class="button-row" style="margin-top:10px">
-            <button class="accent" onclick="saveMaxDevices()">💾 Save Limit</button>
+            <button class="accent" onclick="saveMaxDevices()">Save Limit</button>
           </div>
           <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
           <p style="font-size:13px;font-weight:700;margin-bottom:8px">My Trusted Devices</p>
@@ -716,8 +751,8 @@
             <input id="int-url" type="url" placeholder="https://…" />
           </div>
           <div class="button-row" style="margin-top:12px">
-            <button class="primary"   onclick="saveIntegration()">💾 Save</button>
-            <button class="secondary" onclick="removeIntegration()">🗑 Remove</button>
+            <button class="primary"   onclick="saveIntegration()">Save</button>
+            <button class="secondary" onclick="removeIntegration()">Remove</button>
           </div>
           <div id="int-status" class="hint" style="margin-top:8px"></div>
         </article>
@@ -734,9 +769,9 @@
 
 <!-- ══════ CONTEXT MENU ══════ -->
 <div id="context-menu" class="context-menu hidden">
-  <button data-action="update">✏️ Update</button>
-  <button data-action="remove">🗑️ Remove</button>
-  <button data-action="qr">📱 Generate QR</button>
+  <button data-action="update"> Update</button>
+  <button data-action="remove"> Remove</button>
+  <button data-action="qr"> Generate QR</button>
 </div>
 
 <!-- ══════ MODAL OVERLAY ══════ -->
@@ -790,9 +825,9 @@
   <div id="forgot-step-channel" class="hidden">
     <p class="hint" style="margin-bottom:14px">Where should we send your code?</p>
     <div class="modal-actions" style="flex-direction:column">
-      <button class="primary" style="width:100%" onclick="sendResetCode('email')">📧 Email</button>
-      <button class="primary" style="width:100%" onclick="sendResetCode('phone')">📱 Phone (SMS)</button>
-      <button class="primary" style="width:100%" onclick="sendResetCode('whatsapp')">💬 WhatsApp</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('email')">Email</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('phone')">SMS</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('whatsapp')">WhatsApp</button>
     </div>
     <p class="hint" style="margin-top:10px"><a href="#" onclick="event.preventDefault(); backToForgotStep1()">← Back</a></p>
   </div>
@@ -804,7 +839,7 @@
     <div class="field-group" style="margin-top:12px"><label>New Password</label>
       <div class="input-eye">
         <input id="forgot-new-password" type="password" maxlength="128" placeholder="Min 8 characters" />
-        <button type="button" class="eye-btn" onclick="toggleEye('forgot-new-password',this)">👁</button>
+        <button type="button" class="eye-btn" onclick="toggleEye('forgot-new-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
       </div></div>
     <div class="modal-actions"><button class="primary" onclick="confirmResetCode()">Reset Password</button></div>
   </div>
@@ -817,8 +852,29 @@
   <p class="hint" style="margin-bottom:16px">This device hasn't been verified before. Trust it to continue?</p>
   <p id="device-modal-error" class="hidden" style="color:var(--danger);font-size:13px;margin-bottom:12px;font-weight:600"></p>
   <div class="modal-actions">
-    <button class="primary"   onclick="trustThisDevice()">✅ Trust This Device</button>
+    <button class="primary"   onclick="trustThisDevice()">Trust This Device</button>
     <button class="secondary" onclick="closeModal()">Not Now</button>
+  </div>
+</div>
+
+<!-- ══════ GEOFENCE WARNING (admin override) ══════ -->
+<div id="geo-warn-modal" class="modal hidden">
+  <div class="modal-header"><h3>⚠️ Location Mismatch</h3></div>
+  <p id="geo-warn-msg" class="hint" style="margin-bottom:10px"></p>
+  <p class="hint" style="margin-bottom:16px">Staff current location: <strong id="geo-warn-lat">—</strong></p>
+  <div class="modal-actions">
+    <button class="primary"   id="geo-warn-proceed">Sign in anyway</button>
+    <button class="secondary" id="geo-warn-abort">Abort</button>
+  </div>
+</div>
+
+<!-- ══════ SHIFT SELECT (staff portal) ══════ -->
+<div id="shift-select-modal" class="modal hidden">
+  <div class="modal-header"><h3>🕐 Select Shift</h3></div>
+  <p class="hint" style="margin-bottom:16px">Which shift are you clocking for?</p>
+  <div class="modal-actions" style="flex-direction:column;gap:10px">
+    <button class="primary"   id="shift-modal-day"   style="width:100%">Day Shift</button>
+    <button class="secondary" id="shift-modal-night" style="width:100%">Night Shift</button>
   </div>
 </div>
 
@@ -862,8 +918,8 @@
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
     <input type="text" id="viewall-search" placeholder="Search by name or ID…"
            style="flex:1;min-width:180px" oninput="filterViewAll()" />
-    <button class="accent" onclick="exportViewAllExcel()">📥 Excel</button>
-    <button class="accent" onclick="exportViewAllPDF()">📄 PDF</button>
+    <button class="accent" onclick="exportViewAllExcel()">Excel</button>
+    <button class="accent" onclick="exportViewAllPDF()">PDF</button>
   </div>
   <div class="table-wrap" style="max-height:55vh;overflow-y:auto">
     <table id="viewall-table">
