@@ -3,564 +3,933 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Superadmin — S Advanced Attendance</title>
+  <meta name="theme-color" content="#0b1733" />
+  <title>S High Advanced Attendance</title>
+  <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <style>
-    :root {
-      --bg: #0c1532;
-      --surface: rgba(255,255,255,0.08);
-      --surface-strong: rgba(255,255,255,0.12);
-      --text: #eef4ff;
-      --text-muted: #bfc9e3;
-      --accent: #3fc1c9;
-      --accent-strong: #2c9ea1;
-      --danger: #ff6b6b;
-      --success: #6dd28f;
-      --warn: #f0c040;
-      --shadow: 0 24px 60px rgba(0,0,0,0.24);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      min-height: 100%;
-      font-family: "Sora", Inter, system-ui, sans-serif;
-      background: radial-gradient(circle at top left, rgba(63,193,201,0.22), transparent 28%),
-                  radial-gradient(circle at bottom right, rgba(50,95,255,0.18), transparent 30%),
-                  linear-gradient(180deg, #0f204a 0%, #0b1326 100%);
-      color: var(--text);
-    }
-
-    /* ── Login ── */
-    #login-screen {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }
-    .login-card {
-      background: rgba(255,255,255,0.07);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 20px;
-      padding: 40px 36px;
-      width: 100%;
-      max-width: 420px;
-      box-shadow: var(--shadow);
-    }
-    .login-logo { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
-    .badge-super {
-      width: 48px; height: 48px; border-radius: 14px;
-      background: linear-gradient(135deg, #ff6b6b, #a855f7);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 22px; font-weight: 800; color: #fff;
-    }
-    .login-title { font-size: 20px; font-weight: 700; }
-    .login-sub   { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
-    .field-group { margin-bottom: 16px; }
-    .field-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
-    .field-group input {
-      width: 100%; padding: 11px 14px; background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
-      color: var(--text); font-family: inherit; font-size: 14px;
-      outline: none; transition: border-color .2s;
-    }
-    .field-group input:focus { border-color: var(--accent); }
-    .btn-primary {
-      width: 100%; padding: 13px; border-radius: 12px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-      color: #fff; font-family: inherit; font-size: 15px; font-weight: 700;
-      border: none; cursor: pointer; transition: opacity .2s;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-    }
-    .btn-primary:hover { opacity: .88; }
-    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
-    .auth-err {
-      margin-top: 14px; padding: 10px 14px; border-radius: 10px;
-      background: rgba(255,107,107,0.15); border: 1px solid rgba(255,107,107,0.3);
-      color: var(--danger); font-size: 13px; text-align: center;
-    }
-    .hidden { display: none !important; }
-
-    /* ── App shell ── */
-    #app-screen { min-height: 100vh; }
-
-    /* ── Topbar ── */
-    .topbar {
-      background: rgba(255,255,255,0.06);
-      backdrop-filter: blur(16px);
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-      padding: 0 28px;
-      height: 62px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .topbar-brand { display: flex; align-items: center; gap: 10px; }
-    .topbar-badge {
-      width: 36px; height: 36px; border-radius: 10px;
-      background: linear-gradient(135deg, #ff6b6b, #a855f7);
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 800; font-size: 16px;
-    }
-    .topbar-title { font-size: 16px; font-weight: 700; }
-    .topbar-sub   { font-size: 11px; color: var(--text-muted); }
-    .topbar-actions { display: flex; align-items: center; gap: 12px; }
-    .btn-ghost {
-      padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15);
-      background: rgba(255,255,255,0.06); color: var(--text); font-size: 13px;
-      font-family: inherit; cursor: pointer; transition: background .2s;
-    }
-    .btn-ghost:hover { background: rgba(255,255,255,0.12); }
-    .server-time { font-size: 12px; color: var(--text-muted); }
-
-    /* ── Main layout ── */
-    .main { padding: 28px; max-width: 1400px; margin: 0 auto; }
-
-    /* ── KPI cards ── */
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 28px;
-    }
-    .kpi-card {
-      background: var(--surface);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 16px;
-      padding: 20px 22px;
-    }
-    .kpi-label { font-size: 12px; color: var(--text-muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-    .kpi-val   { font-size: 32px; font-weight: 800; margin-top: 6px; line-height: 1; }
-    .kpi-sub   { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-
-    /* ── Section ── */
-    .section {
-      background: var(--surface);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 16px;
-      padding: 22px 24px;
-      margin-bottom: 24px;
-    }
-    .section-head {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
-    }
-    .section-title { font-size: 15px; font-weight: 700; }
-
-    /* ── Table ── */
-    .tbl-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    th {
-      text-align: left; padding: 10px 14px; font-size: 12px;
-      font-weight: 700; color: var(--text-muted); text-transform: uppercase;
-      letter-spacing: .04em; border-bottom: 1px solid rgba(255,255,255,0.1);
-    }
-    td {
-      padding: 12px 14px; font-size: 13px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-    }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: rgba(255,255,255,0.04); }
-
-    /* ── Badges ── */
-    .chip {
-      display: inline-block; padding: 3px 10px; border-radius: 20px;
-      font-size: 11px; font-weight: 700; letter-spacing: .03em;
-    }
-    .chip-danger  { background: rgba(255,107,107,0.18); color: var(--danger); }
-    .chip-success { background: rgba(109,210,143,0.18); color: var(--success); }
-
-    /* ── Action buttons ── */
-    .btn-danger {
-      padding: 6px 14px; border-radius: 8px; border: none;
-      background: rgba(255,107,107,0.2); color: var(--danger);
-      font-size: 12px; font-family: inherit; font-weight: 700;
-      cursor: pointer; transition: background .2s;
-    }
-    .btn-danger:hover { background: rgba(255,107,107,0.35); }
-
-    /* ── Newest user callout ── */
-    .callout {
-      padding: 14px 18px; border-radius: 12px;
-      background: rgba(63,193,201,0.1); border: 1px solid rgba(63,193,201,0.25);
-      font-size: 13px; color: var(--text-muted);
-    }
-    .callout strong { color: var(--text); }
-
-    /* ── Toast ── */
-    #toast {
-      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
-      padding: 12px 24px; border-radius: 12px; font-size: 14px; font-weight: 600;
-      z-index: 9999; transition: opacity .3s;
-      background: #1f3060; border: 1px solid rgba(255,255,255,.12);
-    }
-    #toast.success { background: rgba(109,210,143,0.2); border-color: var(--success); color: var(--success); }
-    #toast.error   { background: rgba(255,107,107,0.2); border-color: var(--danger);  color: var(--danger); }
-
-    /* ── Spinner ── */
-    .spinner {
-      width: 18px; height: 18px; border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.25);
-      border-top-color: #fff;
-      animation: spin .7s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Confirm modal ── */
-    .overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,.55);
-      backdrop-filter: blur(4px); z-index: 200;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .modal-card {
-      background: #1a2a55; border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 18px; padding: 32px 28px; width: 360px;
-      box-shadow: 0 32px 80px rgba(0,0,0,.4);
-    }
-    .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
-    .modal-body  { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.6; }
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-    .btn-sm {
-      padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 700;
-      font-family: inherit; cursor: pointer; transition: opacity .2s; border: none;
-    }
-    .btn-sm:hover { opacity: .82; }
-    .btn-confirm { background: var(--danger); color: #fff; }
-    .btn-cancel  { background: rgba(255,255,255,.1); color: var(--text); }
-
-    /* ── Refresh btn ── */
-    .btn-refresh {
-      padding: 7px 14px; border-radius: 8px; border: 1px solid rgba(63,193,201,0.4);
-      background: rgba(63,193,201,0.1); color: var(--accent);
-      font-size: 12px; font-family: inherit; font-weight: 700;
-      cursor: pointer; transition: background .2s;
-    }
-    .btn-refresh:hover { background: rgba(63,193,201,0.2); }
-    .empty-row { text-align: center; color: var(--text-muted); padding: 28px 0 !important; }
-
-    @media (max-width: 600px) {
-      .main { padding: 16px; }
-      .topbar { padding: 0 16px; }
-      .kpi-val { font-size: 26px; }
-    }
-  </style>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
-<!-- ══════ LOGIN ══════ -->
-<div id="login-screen">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="badge-super">S</div>
-      <div>
-        <div class="login-title">Superadmin Panel</div>
-        <div class="login-sub">S Advanced Attendance System</div>
-      </div>
-    </div>
-    <div class="field-group">
-      <label>Superadmin Secret Key</label>
-      <input id="secret-input" type="password" placeholder="Enter secret key…" autocomplete="off"
-             onkeydown="if(event.key==='Enter') doLogin()" />
-    </div>
-    <button class="btn-primary" id="btn-login" onclick="doLogin()">
-      <span id="login-label">Access Panel</span>
-      <div class="spinner hidden" id="login-spinner"></div>
-    </button>
-    <div id="login-err" class="auth-err hidden"></div>
+<!-- ══════ SPLASH SCREEN ══════ -->
+<div id="splash-screen">
+  <div class="auth-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+  <div class="splash-logo-wrap">
+    <div class="splash-ring"></div>
+    <div class="splash-ring-2"></div>
+    <div class="splash-s" id="splash-badge">S</div>
+  </div>
+  <div class="splash-title">S High Advanced System</div>
+  <div class="splash-sub">Attendance Management</div>
+  <div class="splash-dots">
+    <span></span><span></span><span></span>
   </div>
 </div>
 
-<!-- ══════ APP ══════ -->
-<div id="app-screen" class="hidden">
-
-  <div class="topbar">
-    <div class="topbar-brand">
-      <div class="topbar-badge">S</div>
-      <div>
-        <div class="topbar-title">Superadmin</div>
-        <div class="topbar-sub">S Advanced Attendance</div>
-      </div>
+<!-- ══════ ACTION OVERLAY ══════
+     Shown during admin/staff commands (check-in, add/update/delete staff, etc.)
+     Avatar slot shows the user's profile logo instead of the S.
+     Resolves into a 3-D tick on success or X on fail, then fades out.
+══════════════════════════════ -->
+<div id="action-overlay">
+  <div class="ao-wrap">
+    <div class="ao-ring"></div>
+    <div class="ao-ring-2"></div>
+    <div class="ao-avatar" id="ao-avatar">S</div>
+    <div class="ao-result success" id="ao-success">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Outer circle -->
+        <circle cx="40" cy="40" r="36" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+        <!-- 3-D effect: inner circle -->
+        <circle cx="40" cy="40" r="28" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+        <!-- Checkmark -->
+        <polyline class="ao-checkmark" points="22,42 34,54 58,28"
+          stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
     </div>
-    <div class="topbar-actions">
-      <span class="server-time" id="srv-time"></span>
-      <button class="btn-ghost" onclick="loadAll()">🔄 Refresh</button>
-      <button class="btn-ghost" onclick="doLogout()">Sign Out</button>
+    <div class="ao-result fail" id="ao-fail">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="40" cy="40" r="36" stroke="currentColor" stroke-width="3" opacity="0.25"/>
+        <circle cx="40" cy="40" r="28" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+        <line class="ao-cross-a" x1="26" y1="26" x2="54" y2="54"
+          stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+        <line class="ao-cross-b" x1="54" y1="26" x2="26" y2="54"
+          stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+      </svg>
     </div>
   </div>
+  <div class="ao-label" id="ao-label">Processing…</div>
+</div>
 
-  <div class="main">
-
-    <!-- KPIs -->
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">Total Companies</div>
-        <div class="kpi-val" id="kpi-users">—</div>
-        <div class="kpi-sub">Registered admin accounts</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Total Staff</div>
-        <div class="kpi-val" id="kpi-staff">—</div>
-        <div class="kpi-sub">Across all companies</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Attendance Records</div>
-        <div class="kpi-val" id="kpi-att">—</div>
-        <div class="kpi-sub">All-time entries</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Today Check-ins</div>
-        <div class="kpi-val" id="kpi-today">—</div>
-        <div class="kpi-sub">Across all companies</div>
+<!-- ══════ AUTH ══════ -->
+<div id="auth-shell" class="auth-shell hidden">
+  <div class="auth-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="blob blob-4"></div>
+  </div>
+  <div class="auth-card">
+    <div class="auth-logo">
+      <span class="badge-lg" id="auth-badge">S</span>
+      <div>
+        <div class="auth-brand">S Advanced Attendance</div>
+        <div class="auth-tagline">Secure multi-user attendance management</div>
       </div>
     </div>
 
-    <!-- Newest user callout -->
-    <div class="callout hidden" id="newest-callout">
-      🆕 Newest company: <strong id="newest-company">—</strong>
-      &nbsp;·&nbsp; <span id="newest-email">—</span>
-      &nbsp;·&nbsp; Joined <span id="newest-date">—</span>
+    <div class="auth-role-tabs">
+      <button class="role-tab active" id="rtab-admin" onclick="switchAuthMode('admin')"> Admin</button>
+      <button class="role-tab"        id="rtab-staff" onclick="switchAuthMode('staff')"> Staff Portal</button>
     </div>
 
-    <!-- Users table -->
-    <div class="section" style="margin-top:20px">
-      <div class="section-head">
-        <div class="section-title">All Companies / Admins</div>
-        <button class="btn-refresh" onclick="loadAll()">Refresh</button>
+    <!-- ADMIN PANEL -->
+    <div id="admin-auth-panel">
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login"    onclick="switchTab('login')">Sign In</button>
+        <button class="auth-tab"        id="tab-register" onclick="switchTab('register')">Create Account</button>
       </div>
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Company</th>
-              <th>Email</th>
-              <th>Phone</th>
-              <th>Joined</th>
-              <th>Staff</th>
-              <th>Records</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="users-tbody">
-            <tr><td colspan="8" class="empty-row">Loading…</td></tr>
-          </tbody>
+      <div id="form-login" class="auth-form">
+        <div class="field-group">
+          <label>Email Address</label>
+          <input id="login-email" type="email" placeholder="you@company.com" autocomplete="email" />
+        </div>
+        <div class="field-group">
+          <label>Password</label>
+          <div class="input-eye">
+            <input id="login-password" type="password" placeholder="Your password" autocomplete="current-password" />
+            <button type="button" class="eye-btn" onclick="toggleEye('login-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
+        <button class="auth-submit" id="btn-login" onclick="handleLogin()">
+          <span>Sign In</span><div class="btn-spinner hidden" id="login-spinner"></div>
+        </button>
+        <p style="text-align:center;margin-top:10px">
+          <a href="#" class="forgot-link" onclick="showForgotPassword('admin')">Forgot password?</a>
+        </p>
+      </div>
+      <div id="form-register" class="auth-form hidden">
+        <div class="field-group">
+          <label>Company / Organisation Name <span class="req">*</span></label>
+          <input id="reg-company" type="text" maxlength="80" placeholder="Acme Corp" />
+        </div>
+        <div class="field-group">
+          <label>Email Address <span class="req">*</span></label>
+          <input id="reg-email" type="email" placeholder="you@company.com" autocomplete="email" />
+        </div>
+        <div class="field-group">
+          <label>Phone Number</label>
+          <input id="reg-phone" type="tel" maxlength="30" placeholder="+234 000 0000" />
+        </div>
+        <div class="field-group">
+          <label>Password <span class="req">*</span></label>
+          <div class="input-eye">
+            <input id="reg-password" type="password" maxlength="128" placeholder="Min 8 characters" autocomplete="new-password" />
+            <button type="button" class="eye-btn" onclick="toggleEye('reg-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+          <div class="pw-strength" id="pw-strength"></div>
+        </div>
+        <div class="field-group">
+          <label>Confirm Password <span class="req">*</span></label>
+          <div class="input-eye">
+            <input id="reg-password2" type="password" maxlength="128" placeholder="Repeat password" />
+            <button type="button" class="eye-btn" onclick="toggleEye('reg-password2',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Admin PIN <span class="req">*</span> <span class="field-hint">4 digits</span></label>
+          <input id="reg-pin" type="password" maxlength="4" placeholder="e.g. 1234" inputmode="numeric" pattern="\d{4}" autocomplete="new-password" />
+        </div>
+        <button class="auth-submit" id="btn-register" onclick="handleRegister()">
+          <span>Create Account</span><div class="btn-spinner hidden" id="register-spinner"></div>
+        </button>
+      </div>
+    </div>
+
+    <!-- STAFF PORTAL -->
+    <div id="staff-auth-panel" class="hidden">
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="stab-login"    onclick="switchStaffTab('login')">Sign In</button>
+        <button class="auth-tab"        id="stab-register" onclick="switchStaffTab('register')">Link Account</button>
+      </div>
+      <div id="staff-form-login" class="auth-form">
+        <div class="field-group">
+          <label>Staff Email</label>
+          <input id="slogin-email" type="email" placeholder="your.email@company.com" />
+        </div>
+        <div class="field-group">
+          <label>Password</label>
+          <div class="input-eye">
+            <input id="slogin-password" type="password" placeholder="Your password" />
+            <button type="button" class="eye-btn" onclick="toggleEye('slogin-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
+        <button class="auth-submit" id="btn-staff-login" onclick="handleStaffLogin()">
+          <span>Sign In</span><div class="btn-spinner hidden" id="staff-login-spinner"></div>
+        </button>
+        <p style="text-align:center;margin-top:10px">
+          <a href="#" class="forgot-link" onclick="showForgotPassword('staff')">Forgot password?</a>
+        </p>
+      </div>
+      <div id="staff-form-register" class="auth-form hidden">
+        <p class="hint" style="margin-bottom:12px">Link your staff ID to create a personal login.</p>
+        <div class="field-group">
+          <label>Company Admin Email <span class="req">*</span></label>
+          <input id="sreg-company-email" type="email" placeholder="admin@company.com" />
+        </div>
+        <div class="field-group">
+          <label>Your Staff ID <span class="req">*</span></label>
+          <input id="sreg-staffid" type="text" maxlength="20" placeholder="S-ABC123" />
+        </div>
+        <div class="field-group">
+          <label>Your Email <span class="req">*</span></label>
+          <input id="sreg-email" type="email" placeholder="you@email.com" />
+        </div>
+        <div class="field-group">
+          <label>Password <span class="req">*</span></label>
+          <div class="input-eye">
+            <input id="sreg-password" type="password" maxlength="128" placeholder="Min 8 characters" />
+            <button type="button" class="eye-btn" onclick="toggleEye('sreg-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
+        <button class="auth-submit" id="btn-staff-register" onclick="handleStaffRegister()">
+          <span>Link Account</span><div class="btn-spinner hidden" id="staff-reg-spinner"></div>
+        </button>
+      </div>
+    </div>
+    <div id="auth-message" class="auth-message hidden"></div>
+  </div>
+</div>
+
+
+<!-- ══════ STAFF SHELL ══════ -->
+<div id="staff-shell" class="app-shell hidden">
+  <header class="app-header">
+    <div class="header-left">
+      <span class="badge" id="staff-badge">S</span>
+      <div class="header-titles">
+        <h1 id="staff-company-display" class="company-headline">Company</h1>
+        <p class="app-subtitle" id="staff-name-display">Staff Portal</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="staff-mute-btn" class="pill" onclick="toggleStaffMute()" title="Mute/unmute sounds"></button>
+      <button class="danger-pill pill" onclick="confirmSignOut()">Sign Out</button>
+    </div>
+  </header>
+
+  <div id="staff-notices-bar" style="display:none;margin-bottom:16px"></div>
+
+  <section class="grid-two">
+    <article class="card">
+      <h2>My QR Code</h2>
+      <p class="hint">Show this to the scanner for check-in / check-out.</p>
+      <div id="staff-qr-display" style="display:flex;justify-content:center;padding:16px 0"></div>
+      <div class="button-row" style="justify-content:center;margin-top:8px">
+        <a id="staff-qr-download" download="my-qr.png" class="primary"
+           style="text-decoration:none;padding:11px 20px;border-radius:14px;font-weight:700;font-size:0.88rem">
+          ⬇ Download QR
+        </a>
+      </div>
+    </article>
+
+    <article class="card">
+      <h2>Clock In / Out</h2>
+      <p class="hint" id="geo-status-staff">Getting your location…</p>
+      <p class="hint" id="staff-schedule-display" style="margin-top:4px;color:var(--accent)"></p>
+      <div id="shift-selector" class="hidden" style="margin:12px 0">
+        <label style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:6px;display:block">Select Shift</label>
+        <div style="display:flex;gap:8px">
+          <button class="pill active" id="shift-btn-day"   onclick="selectShift('day')">Day Shift</button>
+          <button class="pill"        id="shift-btn-night" onclick="selectShift('night')">Night Shift</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+        <button class="primary"   id="btn-staff-checkin"  onclick="staffSelfRecord('check_in')">Clock In</button>
+        <button class="secondary" id="btn-staff-checkout" onclick="staffSelfRecord('check_out')">Clock Out</button>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <article class="card wide-card">
+      <div class="card-header">
+        <h2>My Attendance Summary</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="pill active" id="sbtn-daily"   onclick="loadStaffSummary('daily')">Today</button>
+          <button class="pill"        id="sbtn-weekly"  onclick="loadStaffSummary('weekly')">Weekly</button>
+          <button class="pill"        id="sbtn-monthly" onclick="loadStaffSummary('monthly')">Monthly</button>
+          <button class="pill"        id="sbtn-annual"  onclick="loadStaffSummary('annual')">Annual</button>
+        </div>
+      </div>
+      <div id="staff-summary-stats" class="summary-card-row"></div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table id="staff-att-table">
+          <thead><tr><th>Date</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
+          <tbody></tbody>
         </table>
       </div>
-    </div>
-
-  </div>
+    </article>
+  </section>
+  <footer class="app-footer"><p>S Advanced Attendance — Staff Portal</p></footer>
 </div>
 
-<!-- Confirm delete modal -->
-<div class="overlay hidden" id="confirm-overlay">
-  <div class="modal-card">
-    <div class="modal-title">⚠️ Delete Company Account</div>
-    <div class="modal-body" id="confirm-body">
-      This will permanently delete the company, all its staff, and all attendance records. This cannot be undone.
+
+<!-- ══════ ADMIN SHELL ══════ -->
+<div id="app-shell" class="app-shell hidden">
+  <header class="app-header">
+    <div class="header-left">
+      <span class="badge" id="admin-badge">S</span>
+      <div class="header-titles">
+        <h1 id="company-name-display" class="company-headline">Company Name</h1>
+        <p class="app-subtitle">S Advanced Attendance System</p>
+      </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn-sm btn-cancel" onclick="closeConfirm()">Cancel</button>
-      <button class="btn-sm btn-confirm" id="btn-confirm-del">Delete</button>
+    <div class="header-actions">
+      <button id="btn-view-staff" class="pill">⟳ Refresh</button>
+      <button class="danger-pill pill" onclick="confirmSignOut()">Sign Out</button>
     </div>
-  </div>
-</div>
+  </header>
 
-<div id="toast" class="hidden"></div>
+  <nav class="app-nav" id="admin-nav">
+    <button class="nav-tab active" data-tab="dashboard"  onclick="switchMainTab('dashboard')">
+      <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+    </button>
+    <button class="nav-tab" data-tab="staff"       onclick="switchMainTab('staff')">
+      <span class="nav-icon">👥</span><span class="nav-label">Staff</span>
+    </button>
+    <button class="nav-tab" data-tab="attendance"  onclick="switchMainTab('attendance')">
+      <span class="nav-icon">📋</span><span class="nav-label">Attendance</span>
+    </button>
+    <button class="nav-tab" data-tab="reports"     onclick="switchMainTab('reports')">
+      <span class="nav-icon">📑</span><span class="nav-label">Reports</span>
+    </button>
+    <button class="nav-tab" data-tab="analytics"   onclick="switchMainTab('analytics')">
+      <span class="nav-icon">🤖</span><span class="nav-label">Analytics</span>
+    </button>
+    <button class="nav-tab" data-tab="notices"     onclick="switchMainTab('notices')">
+      <span class="nav-icon">📢</span><span class="nav-label">Notices</span>
+    </button>
+    <button class="nav-tab" data-tab="feedback"    onclick="switchMainTab('feedback')">
+      <span class="nav-icon">💬</span><span class="nav-label">Feedback</span>
+    </button>
+    <button class="nav-tab" data-tab="settings"    onclick="switchMainTab('settings')">
+      <span class="nav-icon">⚙️</span><span class="nav-label">Settings</span>
+    </button>
+  </nav>
 
-<script>
-"use strict";
+  <main>
 
-const API_URL = "https://s-highadavnced-system.onrender.com";
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tab-panel">
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-val" id="kpi-today">—</div><div class="kpi-label">Today Check-Ins</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="kpi-week">—</div><div class="kpi-label">This Week</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="kpi-staff">—</div><div class="kpi-label">Total Staff</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="kpi-clocked">—</div><div class="kpi-label">Currently In</div></div>
+      </div>
+      <article class="card wide-card">
+        <h2>14-Day Check-In Trend</h2>
+        <canvas id="trend-chart" height="90"></canvas>
+      </article>
+      <article class="card wide-card">
+        <div class="card-header">
+          <h2>Attendance Summary</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="pill active" id="dash-period-daily"   onclick="switchDashPeriod('daily')">Today</button>
+            <button class="pill"        id="dash-period-weekly"  onclick="switchDashPeriod('weekly')">Weekly</button>
+            <button class="pill"        id="dash-period-monthly" onclick="switchDashPeriod('monthly')">Monthly</button>
+            <button class="pill"        id="dash-period-annual"  onclick="switchDashPeriod('annual')">Annual</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="summary-table">
+            <thead><tr><th>Staff</th><th>Hours</th><th>Days Present</th><th>Punctuality</th><th>Attendance %</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
 
-// ── Secret storage (session only) ──────────────────────────────────────────
-let _secret = sessionStorage.getItem("sa_secret") || "";
+    <!-- STAFF -->
+    <section id="tab-staff" class="tab-panel hidden">
+      <div class="grid-two">
+        <article class="card">
+          <h2>Staff Management</h2>
+          <div id="update-banner" class="update-mode-banner hidden">
+            <span>✏️ Editing: <strong id="update-banner-id"></strong></span>
+            <button id="btn-cancel-update" type="button">Cancel</button>
+          </div>
+          <div id="staff-form" class="form-grid" style="margin-top:12px">
+            <label>Name <span class="req">*</span></label>
+            <input id="staff-name"  type="text"  maxlength="80"  placeholder="Full name" />
+            <label>Email</label>
+            <input id="staff-email" type="email" maxlength="120" placeholder="email@example.com" />
+            <label>Phone</label>
+            <input id="staff-phone" type="tel"   maxlength="30"  placeholder="+234 000 0000" />
+            <label>Staff ID</label>
+            <input id="staff-id"    type="text"  maxlength="20"  readonly placeholder="Auto-generated" />
+            <div style="grid-column:1/-1">
+              <button type="button" id="btn-submit-staff" class="primary" style="width:100%">Add Staff</button>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:12px">Right-click (PC) or long-press (mobile) a row to update, remove, or generate QR.</p>
+        </article>
 
-function doLogin() {
-  const val = document.getElementById("secret-input").value.trim();
-  if (!val) return showErr("Please enter the superadmin secret key.");
-  _secret = val;
-  sessionStorage.setItem("sa_secret", val);
-  document.getElementById("btn-login").disabled = true;
-  document.getElementById("login-spinner").classList.remove("hidden");
-  document.getElementById("login-label").textContent = "Verifying…";
+        <article class="card">
+          <h2>Attendance Actions</h2>
+          <!-- Staff Search -->
+          <div class="search-dropdown-wrap" style="margin-bottom:14px">
+            <input id="staff-search-input" type="text" placeholder="🔍 Search staff by name…"
+                   oninput="searchStaffLive(this.value, 'attendance')" autocomplete="off" />
+            <div id="staff-search-results" class="search-results hidden"></div>
+            <input id="attendance-staff" type="hidden" />
+            <div id="selected-staff-display" style="margin-top:8px;font-size:13px;color:var(--accent);font-weight:600;min-height:20px"></div>
+          </div>
+          <div class="button-row">
+            <button id="btn-scan-checkin"  class="accent">📷 Scan Check-In</button>
+            <button id="btn-scan-checkout" class="accent">📷 Scan Check-Out</button>
+          </div>
+          <div class="button-row" style="margin-top:8px">
+            <button id="btn-manual-checkin"  class="secondary">✅ Manual Check-In</button>
+            <button id="btn-manual-checkout" class="secondary">🚪 Manual Check-Out</button>
+          </div>
+          <p class="hint" id="admin-geo-status" style="margin-top:8px"></p>
+        </article>
+      </div>
 
-  // Test by fetching stats
-  saFetch("/superadmin/stats")
-    .then(data => {
-      document.getElementById("login-screen").classList.add("hidden");
-      document.getElementById("app-screen").classList.remove("hidden");
-      renderStats(data);
-      loadUsers();
-    })
-    .catch(err => {
-      _secret = "";
-      sessionStorage.removeItem("sa_secret");
-      showErr(err.message || "Invalid secret key.");
-      document.getElementById("btn-login").disabled = false;
-      document.getElementById("login-spinner").classList.add("hidden");
-      document.getElementById("login-label").textContent = "Access Panel";
-    });
-}
+      <article class="card wide-card">
+        <div class="card-header">
+          <h2>Registered Staff</h2>
+          <span id="staff-count" class="tag">0 staff</span>
+        </div>
+        <div class="table-wrap">
+          <table id="staff-table">
+            <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" style="margin-top:8px">Right-click (PC) or long-press (mobile) a row for actions.</p>
+      </article>
+    </section>
 
-function doLogout() {
-  _secret = "";
-  sessionStorage.removeItem("sa_secret");
-  document.getElementById("app-screen").classList.add("hidden");
-  document.getElementById("login-screen").classList.remove("hidden");
-  document.getElementById("secret-input").value = "";
-}
+    <!-- ATTENDANCE -->
+    <section id="tab-attendance" class="tab-panel hidden">
+      <article class="card wide-card">
+        <div class="card-header">
+          <h2>Attendance Log</h2>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span id="attendance-count" class="tag">0 entries</span>
+            <button class="pill" onclick="openViewAll()">View All</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="attendance-table">
+            <thead><tr><th>Date</th><th>Staff</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
 
-function showErr(msg) {
-  const el = document.getElementById("login-err");
-  el.textContent = msg;
-  el.classList.remove("hidden");
-}
+    <!-- REPORTS -->
+    <section id="tab-reports" class="tab-panel hidden">
+      <article class="card wide-card">
+        <h2>Generate Report</h2>
+        <div class="form-grid" style="max-width:500px">
+          <label>From Date</label><input type="date" id="report-from" />
+          <label>To Date</label>  <input type="date" id="report-to" />
+          <label>Staff</label>
+          <div class="search-dropdown-wrap">
+            <input id="report-search-input" type="text" placeholder="🔍 Search staff or leave blank for all…"
+                   oninput="searchStaffLive(this.value, 'report')" autocomplete="off" />
+            <div id="report-search-results" class="search-results hidden"></div>
+            <input id="report-staff-id" type="hidden" />
+            <div id="report-staff-display" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600;min-height:18px"></div>
+          </div>
+        </div>
+        <div class="button-row" style="margin-top:16px">
+          <button class="primary" onclick="generateReport()">Generate</button>
+          <button class="accent"  onclick="exportExcel()">Excel</button>
+          <button class="accent"  onclick="exportPDF()">PDF</button>
+        </div>
+      </article>
+      <article class="card wide-card">
+        <div class="card-header">
+          <h2>Report Results</h2><span id="report-count" class="tag">—</span>
+        </div>
+        <div class="table-wrap">
+          <table id="report-table">
+            <thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th><th>Status</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
 
-// ── API helper ─────────────────────────────────────────────────────────────
-async function saFetch(path, options = {}) {
-  const headers = {
-    "Content-Type": "application/json",
-    "X-Admin-Secret": _secret
-  };
-  const res  = await fetch(`${API_URL}${path}`, { headers, ...options });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
-}
+    <!-- ANALYTICS -->
+    <section id="tab-analytics" class="tab-panel hidden">
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-val" id="ai-today">—</div><div class="kpi-label">Today Check-Ins</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="ai-week">—</div><div class="kpi-label">Week Check-Ins</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="ai-avg-hr">—</div><div class="kpi-label">Avg Check-In Hour</div></div>
+        <div class="kpi-card"><div class="kpi-val" id="ai-still-in">—</div><div class="kpi-label">Still Clocked In</div></div>
+      </div>
+      <div class="grid-two">
+        <article class="card"><h2>🏆 Top Performers (30d)</h2><ul class="performer-list" id="top-performers"></ul></article>
+        <article class="card"><h2>⚠️ Low Attendance (30d)</h2><ul class="performer-list" id="low-attendance"></ul></article>
+        <article class="card"><h2>🟢 Still Clocked In Today</h2><ul class="performer-list" id="still-clocked"></ul></article>
+        <article class="card"><h2>⏰ Punctuality Breakdown (30d)</h2><canvas id="lateness-chart" height="140"></canvas></article>
+      </div>
+      <article class="card wide-card"><h2>Attendance Frequency (30d)</h2><canvas id="freq-chart" height="80"></canvas></article>
+    </section>
 
-// ── Toast ─────────────────────────────────────────────────────────────────
-let _toastTimer = null;
-function toast(msg, type = "success") {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.className = type;
-  el.classList.remove("hidden");
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
-}
+    <!-- NOTICES -->
+    <section id="tab-notices" class="tab-panel hidden">
+      <div class="grid-two">
+        <article class="card">
+          <h2>📢 Post a Notice</h2>
+          <div class="form-grid" style="margin-top:8px">
+            <label>Title <span class="req">*</span></label>
+            <input id="notice-title" type="text" maxlength="120" placeholder="Notice title" />
+            <label>Message <span class="req">*</span></label>
+            <textarea id="notice-body" rows="4" maxlength="500" placeholder="Write your notice here…"
+              style="resize:vertical;padding:10px 14px;border-radius:12px;
+                     border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);
+                     color:var(--text);font-family:inherit;font-size:14px"></textarea>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;grid-column:1/-1">
+              <input type="checkbox" id="notice-pinned" /> <span>📌 Pin this notice</span>
+            </label>
+          </div>
+          <div class="button-row" style="margin-top:12px">
+            <button class="primary" onclick="postNotice()">Post Notice</button>
+          </div>
+        </article>
+        <article class="card"><h2>Active Notices</h2><div id="notices-list"><p class="hint">No notices yet.</p></div></article>
+      </div>
+    </section>
 
-// ── Render stats ──────────────────────────────────────────────────────────
-function renderStats(data) {
-  document.getElementById("kpi-users").textContent  = data.total_users       ?? "—";
-  document.getElementById("kpi-staff").textContent  = data.total_staff       ?? "—";
-  document.getElementById("kpi-att").textContent    = data.total_attendance  ?? "—";
-  document.getElementById("kpi-today").textContent  = data.today_checkins    ?? "—";
-  document.getElementById("srv-time").textContent   = data.server_time
-    ? "Server: " + new Date(data.server_time + "Z").toLocaleTimeString() : "";
-
-  if (data.newest_user) {
-    const el = document.getElementById("newest-callout");
-    el.classList.remove("hidden");
-    document.getElementById("newest-company").textContent = data.newest_user.company;
-    document.getElementById("newest-email").textContent   = data.newest_user.email;
-    document.getElementById("newest-date").textContent    = data.newest_user.created_at
-      ? new Date(data.newest_user.created_at).toLocaleDateString() : "—";
-  }
-}
-
-// ── Load users table ───────────────────────────────────────────────────────
-async function loadUsers() {
-  const tbody = document.getElementById("users-tbody");
-  tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Loading…</td></tr>';
-  try {
-    const users = await saFetch("/superadmin/users");
-    tbody.innerHTML = "";
-    if (!users.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="empty-row">No companies registered yet.</td></tr>';
-      return;
-    }
-    users.forEach(u => {
-      const tr = document.createElement("tr");
-      const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : "—";
-      tr.innerHTML = `
-        <td><span style="color:var(--text-muted);font-size:12px">#${u.id}</span></td>
-        <td><strong>${esc(u.company)}</strong></td>
-        <td style="color:var(--text-muted)">${esc(u.email)}</td>
-        <td style="color:var(--text-muted)">${esc(u.phone || "—")}</td>
-        <td style="color:var(--text-muted);font-size:12px">${joined}</td>
-        <td><span class="chip chip-success">${u.staff_count}</span></td>
-        <td><span style="font-size:12px;color:var(--text-muted)">${u.attendance_count}</span></td>
-        <td>
-          <button class="btn-danger" data-id="${u.id}" data-company="${esc(u.company)}" data-email="${esc(u.email)}">
-            🗑 Delete
+    <!-- FEEDBACK -->
+    <section id="tab-feedback" class="tab-panel hidden">
+      <article class="card wide-card" style="max-width:600px;margin:0 auto">
+        <h2> Send Feedback</h2>
+        <p class="hint">Share your thoughts or suggestions with the system developer.</p>
+        <div class="form-grid" style="margin-top:16px">
+          <label>Rating (optional)</label>
+          <div id="star-rating" style="display:flex;gap:8px;font-size:28px;cursor:pointer">
+            <span onclick="setRating(1)">⭐</span><span onclick="setRating(2)">⭐</span>
+            <span onclick="setRating(3)">⭐</span><span onclick="setRating(4)">⭐</span>
+            <span onclick="setRating(5)">⭐</span>
+          </div>
+          <label>Message <span class="req">*</span></label>
+          <textarea id="feedback-message" rows="5" maxlength="1000" placeholder="Write your feedback here…"
+            style="resize:vertical;padding:10px 14px;border-radius:12px;
+                   border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);
+                   color:var(--text);font-family:inherit;font-size:14px"></textarea>
+        </div>
+        <div class="button-row" style="margin-top:16px">
+          <button class="primary" onclick="submitFeedback()">
+            <span id="feedback-btn-label">Send Feedback</span>
+            <div class="btn-spinner hidden" id="feedback-spinner"></div>
           </button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    });
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-row" style="color:var(--danger)">${err.message}</td></tr>`;
-  }
-}
+        </div>
+        <p id="feedback-status" class="hint" style="margin-top:10px;text-align:center"></p>
+      </article>
+    </section>
 
-async function loadAll() {
-  try {
-    const stats = await saFetch("/superadmin/stats");
-    renderStats(stats);
-  } catch (_) {}
-  await loadUsers();
-  toast("Refreshed!", "success");
-}
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab-panel hidden">
+      <div class="grid-two">
 
-// ── Delete flow ───────────────────────────────────────────────────────────
-let _deleteId = null;
-function confirmDelete(id, company, email) {
-  _deleteId = id;
-  document.getElementById("confirm-body").innerHTML =
-    `This will permanently delete <strong>${esc(company)}</strong> (${esc(email)}), all their staff, and all attendance records.<br><br>This <strong>cannot</strong> be undone.`;
-  document.getElementById("confirm-overlay").classList.remove("hidden");
-}
+        <!-- Profile Picture -->
+        <article class="card">
+          <h2> Company Profile</h2>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+            <div id="profile-pic-preview" style="width:72px;height:72px;border-radius:50%;
+                 background:linear-gradient(135deg,#3fc1c9,#2c9ea1);display:flex;align-items:center;
+                 justify-content:center;font-size:28px;font-weight:800;color:#fff;overflow:hidden;flex-shrink:0;
+                 box-shadow:0 0 24px var(--accent-glow)">S</div>
+            <div>
+              <p class="hint">Upload your company logo. Shows across all staff interfaces.</p>
+              <div class="button-row" style="margin-top:8px">
+                <label class="primary" style="cursor:pointer;padding:9px 16px;border-radius:12px;
+                       background:linear-gradient(135deg,#3fc1c9,#2c9ea1);color:#fff;
+                       font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px">
+                  📷 Upload Logo
+                  <input type="file" id="profile-pic-input" accept="image/jpeg,image/png,image/webp"
+                         style="display:none" onchange="handleProfilePicUpload(this)" />
+                </label>
+                <button class="secondary" onclick="removeProfilePic()">Remove</button>
+              </div>
+            </div>
+          </div>
+          <div id="profile-pic-status" class="hint"></div>
+        </article>
 
-document.getElementById("users-tbody").addEventListener("click", e => {
-  const btn = e.target.closest(".btn-danger");
-  if (!btn) return;
-  // Values come from data-attributes (set via esc() at render time), never
-  // re-parsed as code — safe regardless of what characters a company name
-  // contains, unlike the old inline onclick="...('${...}')" approach.
-  confirmDelete(Number(btn.dataset.id), btn.dataset.company, btn.dataset.email);
-});
+        <!-- Edit Profile -->
+        <article class="card">
+          <h2>✏️ Edit Profile</h2>
+          <p class="hint">PIN verification required to unlock editing.</p>
+          <div id="profile-edit-locked" style="margin-top:12px">
+            <button class="primary" onclick="unlockProfileEdit()">Unlock with PIN</button>
+          </div>
+          <div id="profile-edit-form" class="hidden">
+            <div class="form-grid" style="margin-top:12px">
+              <label>Company Name</label>
+              <input id="edit-company" type="text" maxlength="80" />
+              <label>Email</label>
+              <input id="edit-email" type="email" maxlength="120" />
+              <label>Phone</label>
+              <input id="edit-phone" type="tel" maxlength="30" />
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="primary" onclick="saveProfileEdit()">Save Changes</button>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+            <div class="form-grid">
+              <label>New Password</label>
+              <div class="input-eye">
+                <input id="edit-new-password" type="password" maxlength="128" placeholder="Leave blank to keep" />
+                <button type="button" class="eye-btn" onclick="toggleEye('edit-new-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
+              <label>New PIN</label>
+              <input id="edit-new-pin" type="password" maxlength="4" placeholder="Leave blank to keep" inputmode="numeric" pattern="\d{4}" autocomplete="new-password" />
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="accent" onclick="savePasswordPin()">Update Security</button>
+            </div>
+          </div>
+          <p id="profile-edit-status" class="hint" style="margin-top:8px"></p>
+        </article>
 
-function closeConfirm() {
-  _deleteId = null;
-  document.getElementById("confirm-overlay").classList.add("hidden");
-}
+        <!-- Geofence -->
+        <article class="card">
+          <h2>📍 Geofence Settings</h2>
+          <p class="hint">When enabled, staff must be within the set radius to clock in/out.</p>
+          <div style="display:flex;align-items:center;gap:12px;margin:14px 0">
+            <label class="toggle-switch">
+              <input type="checkbox" id="geo-enabled" onchange="toggleGeofenceFields()" />
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="geo-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">Geofencing Off</span>
+          </div>
+          <div id="geo-fields" class="hidden">
+            <div class="form-grid">
+              <label>Office Latitude</label>  <input id="geo-lat" type="number" step="any" placeholder="e.g. 4.8156" />
+              <label>Office Longitude</label> <input id="geo-lng" type="number" step="any" placeholder="e.g. 7.0498" />
+              <label>Radius (metres)</label>  <input id="geo-radius" type="number" min="50" max="5000" value="200" />
+            </div>
+            <div class="button-row" style="margin-top:10px">
+              <button class="primary" onclick="detectMyLocation()">Use My Location</button>
+            </div>
+          </div>
+          <div class="button-row" style="margin-top:12px">
+            <button class="accent" onclick="saveGeofence()">Save Settings</button>
+          </div>
+          <p class="hint" id="geo-saved-status" style="margin-top:8px"></p>
+        </article>
 
-document.getElementById("btn-confirm-del").addEventListener("click", async () => {
-  if (!_deleteId) return;
-  const id = _deleteId;
-  closeConfirm();
-  try {
-    await saFetch(`/superadmin/users/${id}`, { method: "DELETE" });
-    toast(`User #${id} deleted.`, "success");
-    loadAll();
-  } catch (err) {
-    toast(err.message, "error");
-  }
-});
+        <!-- Work Schedule & Clock-out Toggle -->
+        <article class="card">
+          <h2>🕐 Work Schedule</h2>
+          <p class="hint">Set shift times and control clock-out availability.</p>
+          <div class="form-grid" style="margin-top:12px">
+            <label>Check-In Time</label>  <input id="sched-checkin"  type="time" value="09:00" />
+            <label>Check-Out Time</label> <input id="sched-checkout" type="time" value="17:00" />
+            <label style="grid-column:1/-1;margin-top:4px;display:flex;align-items:center;gap:10px">
+              <label class="toggle-switch">
+                <input type="checkbox" id="clockout-enabled" checked />
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="font-size:13px;font-weight:600">Enable Day Shift Clock-Out</span>
+            </label>
+          </div>
+          <div style="margin-top:16px">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
+              <label class="toggle-switch">
+                <input type="checkbox" id="enable-night-shift" onchange="toggleNightShift()" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="font-size:13px;font-weight:600">🌙 Enable Night Shift</span>
+            </label>
+            <div id="night-shift-fields" class="hidden">
+              <div class="form-grid">
+                <label>Night Check-In</label>  <input id="sched-night-checkin"  type="time" value="22:00" />
+                <label>Night Check-Out</label> <input id="sched-night-checkout" type="time" value="06:00" />
+                <label style="grid-column:1/-1;display:flex;align-items:center;gap:10px">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="night-clockout-enabled" checked />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span style="font-size:13px;font-weight:600">Enable Night Shift Clock-Out</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="button-row" style="margin-top:14px">
+            <button class="accent" onclick="saveSchedule()">Save Schedule</button>
+          </div>
+          <p class="hint" id="sched-status" style="margin-top:8px"></p>
+        </article>
 
-// ── Escape HTML helper ─────────────────────────────────────────────────────
-function esc(str) {
-  return String(str ?? "")
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
-}
+        <!-- Sound Settings -->
+        <article class="card">
+          <h2> Sound Settings</h2>
+          <p class="hint">Enable tick/decline sounds for check-in events. Staff can mute from their portal.</p>
+          <div style="display:flex;align-items:center;gap:12px;margin:14px 0">
+            <label class="toggle-switch">
+              <input type="checkbox" id="sound-enabled" onchange="saveSoundSetting()" />
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="sound-enabled-label" style="font-size:13px;font-weight:600;color:var(--text-muted)">Sounds Off</span>
+          </div>
 
-// ── Auto-login if secret already stored ───────────────────────────────────
-if (_secret) {
-  document.getElementById("secret-input").value = "••••••••";
-  doLogin();
-}
+          <!-- Tone pickers -->
+          <div style="display:grid;gap:12px;margin-top:8px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label style="font-size:13px;color:var(--text-muted);font-weight:600;min-width:110px">✅ Success tone</label>
+              <select id="tone-success-select" onchange="SoundEngine.setTone('success', this.value)"
+                style="flex:1;padding:7px 10px;border-radius:10px;font-size:13px;background:var(--glass);border:1px solid var(--glass-border);color:var(--text)">
+              </select>
+              <button class="secondary" onclick="testSuccessSound()" style="white-space:nowrap;padding:7px 12px;font-size:12px">▶ Preview</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label style="font-size:13px;color:var(--text-muted);font-weight:600;min-width:110px">❌ Fail tone</label>
+              <select id="tone-fail-select" onchange="SoundEngine.setTone('fail', this.value)"
+                style="flex:1;padding:7px 10px;border-radius:10px;font-size:13px;background:var(--glass);border:1px solid var(--glass-border);color:var(--text)">
+              </select>
+              <button class="secondary" onclick="testFailSound()" style="white-space:nowrap;padding:7px 12px;font-size:12px">▶ Preview</button>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:10px">The "Device notification" option plays your device's system notification sound (requires notification permission).</p>
+        </article>
 
-// ── Close confirm on overlay click ────────────────────────────────────────
-document.getElementById("confirm-overlay").addEventListener("click", e => {
-  if (e.target === document.getElementById("confirm-overlay")) closeConfirm();
-});
-</script>
+        <!-- Max Trusted Devices -->
+        <article class="card">
+          <h2>🔒 Trusted Devices</h2>
+          <p class="hint">Set how many devices can be trusted for your admin account (max 5).</p>
+          <div class="form-grid" style="margin-top:12px">
+            <label>Max Devices</label>
+            <input id="max-devices" type="number" min="1" max="5" value="3" style="max-width:80px" />
+          </div>
+          <div class="button-row" style="margin-top:10px">
+            <button class="accent" onclick="saveMaxDevices()">Save Limit</button>
+          </div>
+          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+          <p style="font-size:13px;font-weight:700;margin-bottom:8px">My Trusted Devices</p>
+          <div id="devices-list"><p class="hint">Loading…</p></div>
+          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+          <p style="font-size:13px;font-weight:700;margin-bottom:8px">
+            📱 Pending Staff Device Requests
+            <span id="pending-devices-badge" class="hidden"
+              style="display:inline-block;background:var(--danger);color:#fff;
+                     border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;margin-left:6px">0</span>
+          </p>
+          <div id="pending-devices-list"><p class="hint">Loading…</p></div>
+        </article>
+
+        <!-- External Integration -->
+        <article class="card">
+          <h2>🔗 External Integration</h2>
+          <p class="hint">Link a Google Sheet or webhook for automatic attendance push.</p>
+          <div class="form-grid">
+            <label>Type</label>
+            <select id="int-type" onchange="toggleIntFields()">
+              <option value="webhook">Webhook / REST endpoint</option>
+              <option value="google_sheets">Google Sheets (Apps Script)</option>
+            </select>
+            <label id="int-url-label">Webhook URL</label>
+            <input id="int-url" type="url" placeholder="https://…" />
+          </div>
+          <div class="button-row" style="margin-top:12px">
+            <button class="primary"   onclick="saveIntegration()">Save</button>
+            <button class="secondary" onclick="removeIntegration()">Remove</button>
+          </div>
+          <div id="int-status" class="hint" style="margin-top:8px"></div>
+        </article>
+
+      </div>
+    </section>
+  </main>
+  <footer class="app-footer"><p>Your data is encrypted and stored securely.</p></footer>
+</div>
+
+
+<!-- ══════ TOAST ══════ -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- ══════ CONTEXT MENU ══════ -->
+<div id="context-menu" class="context-menu hidden">
+  <button data-action="update">✏️ Update</button>
+  <button data-action="remove">🗑️ Remove</button>
+  <button data-action="qr">📱 Generate QR</button>
+</div>
+
+<!-- ══════ MODAL OVERLAY ══════ -->
+<div id="modal-overlay" class="modal-overlay hidden"></div>
+
+<!-- ══════ SIGN OUT CONFIRM ══════ -->
+<div id="signout-modal" class="modal hidden">
+  <div class="signout-modal-body">
+    <div class="signout-icon">👋</div>
+    <strong>Are you sure you want to sign out?</strong>
+    <p style="margin-top:8px">You will need to sign in again to access your account.</p>
+  </div>
+  <div class="modal-actions" style="justify-content:center;gap:14px">
+    <button class="primary"   onclick="doSignOut()">Continue</button>
+    <button class="secondary" onclick="closeModal()">No, stay</button>
+  </div>
+</div>
+
+<!-- ══════ PIN MODAL ══════ -->
+<div id="pin-modal" class="modal pin-modal hidden">
+  <div class="modal-header">
+    <h3>🔒 Admin PIN Required</h3>
+    <button class="modal-close" id="btn-close-pin">×</button>
+  </div>
+  <p class="pin-desc">Enter your admin PIN to authorise this action.</p>
+  <div class="pin-inputs" id="pin-inputs">
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+    <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
+  </div>
+  <p class="pin-error hidden" id="pin-error">Incorrect PIN. Try again.</p>
+  <div class="modal-actions">
+    <button class="primary"   id="btn-confirm-pin">Confirm</button>
+    <button class="secondary" id="btn-close-pin2">Cancel</button>
+  </div>
+</div>
+
+<!-- ══════ FORGOT PASSWORD ══════ -->
+<div id="forgot-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>🔑 Reset Password</h3>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div id="forgot-step-1">
+    <p class="hint" style="margin-bottom:14px">Enter your email to receive a 6-digit reset code.</p>
+    <div class="field-group"><label>Email Address</label>
+      <input id="forgot-email" type="email" placeholder="your@email.com" /></div>
+    <div class="modal-actions"><button class="primary" onclick="proceedToChannelChoice()">Continue</button></div>
+  </div>
+  <div id="forgot-step-channel" class="hidden">
+    <p class="hint" style="margin-bottom:14px">Where should we send your code?</p>
+    <div class="modal-actions" style="flex-direction:column">
+      <button class="primary" style="width:100%" onclick="sendResetCode('email')">Email</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('phone')">SMS</button>
+      <button class="primary" style="width:100%" onclick="sendResetCode('whatsapp')">WhatsApp</button>
+    </div>
+    <p class="hint" style="margin-top:10px"><a href="#" onclick="event.preventDefault(); backToForgotStep1()">← Back</a></p>
+  </div>
+  <div id="forgot-step-2" class="hidden">
+    <p id="forgot-step-2-hint" class="hint" style="margin-bottom:14px">Enter the 6-digit code sent to you.</p>
+    <div class="field-group"><label>Verification Code</label>
+      <input id="forgot-code" type="text" maxlength="6" placeholder="123456" inputmode="numeric"
+             style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center" /></div>
+    <div class="field-group" style="margin-top:12px"><label>New Password</label>
+      <div class="input-eye">
+        <input id="forgot-new-password" type="password" maxlength="128" placeholder="Min 8 characters" />
+        <button type="button" class="eye-btn" onclick="toggleEye('forgot-new-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+      </div></div>
+    <div class="modal-actions"><button class="primary" onclick="confirmResetCode()">Reset Password</button></div>
+  </div>
+  <p id="forgot-status" class="hint" style="margin-top:10px;text-align:center"></p>
+</div>
+
+<!-- ══════ DEVICE TRUST ══════ -->
+<div id="device-modal" class="modal hidden">
+  <div class="modal-header"><h3>🔒 New Device Detected</h3></div>
+  <p class="hint" style="margin-bottom:16px">This device hasn't been verified before. Trust it to continue?</p>
+  <p id="device-modal-error" class="hidden" style="color:var(--danger);font-size:13px;margin-bottom:12px;font-weight:600"></p>
+  <div class="modal-actions">
+    <button class="primary"   onclick="trustThisDevice()">Trust This Device</button>
+    <button class="secondary" onclick="closeModal()">Not Now</button>
+  </div>
+</div>
+
+<!-- ══════ GEOFENCE WARNING (admin override) ══════ -->
+<div id="geo-warn-modal" class="modal hidden">
+  <div class="modal-header"><h3>⚠️ Location Mismatch</h3></div>
+  <p id="geo-warn-msg" class="hint" style="margin-bottom:10px"></p>
+  <p class="hint" style="margin-bottom:16px">Staff current location: <strong id="geo-warn-lat">—</strong></p>
+  <div class="modal-actions">
+    <button class="primary"   id="geo-warn-proceed">Sign in anyway</button>
+    <button class="secondary" id="geo-warn-abort">Abort</button>
+  </div>
+</div>
+
+<!-- ══════ SHIFT SELECT (staff portal) ══════ -->
+<div id="shift-select-modal" class="modal hidden">
+  <div class="modal-header"><h3>🕐 Select Shift</h3></div>
+  <p class="hint" style="margin-bottom:16px">Which shift are you clocking for?</p>
+  <div class="modal-actions" style="flex-direction:column;gap:10px">
+    <button class="primary"   id="shift-modal-day"   style="width:100%">Day Shift</button>
+    <button class="secondary" id="shift-modal-night" style="width:100%">Night Shift</button>
+  </div>
+</div>
+
+<!-- ══════ SCANNER ══════ -->
+<div id="scanner-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3 id="scanner-title">QR Scanner</h3>
+    <button class="modal-close" id="btn-close-scanner">×</button>
+  </div>
+  <div id="camera-selector-row" class="hidden"
+       style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <label style="font-size:13px;color:var(--text-muted);font-weight:600">📷 Camera:</label>
+    <select id="camera-select" onchange="switchCamera()"
+      style="flex:1;padding:8px 12px;border-radius:10px;font-size:13px"></select>
+  </div>
+  <div id="scanner-container"></div>
+  <div class="modal-actions"><button class="secondary" id="btn-stop-scanner">Stop Scanner</button></div>
+</div>
+
+<!-- ══════ QR MODAL ══════ -->
+<div id="qr-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>Staff QR Code</h3>
+    <button class="modal-close" id="btn-close-qr">×</button>
+  </div>
+  <div class="qr-preview" id="qr-preview" style="display:flex;justify-content:center;padding:16px 0"></div>
+  <div class="modal-actions">
+    <a id="download-qr" download="staff-qr.png" class="primary"
+       style="text-decoration:none;padding:11px 20px;border-radius:14px;font-weight:700;font-size:0.88rem">
+      ⬇ Download QR
+    </a>
+  </div>
+</div>
+
+<!-- ══════ VIEW ALL ══════ -->
+<div id="viewall-modal" class="modal modal-wide hidden">
+  <div class="modal-header">
+    <h3>📋 All Attendance Entries</h3>
+    <button class="modal-close" id="btn-close-viewall">×</button>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+    <input type="text" id="viewall-search" placeholder="Search by name or ID…"
+           style="flex:1;min-width:180px" oninput="filterViewAll()" />
+    <button class="accent" onclick="exportViewAllExcel()">Excel</button>
+    <button class="accent" onclick="exportViewAllPDF()">PDF</button>
+  </div>
+  <div class="table-wrap" style="max-height:55vh;overflow-y:auto">
+    <table id="viewall-table">
+      <thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th><th>Status</th><th>Location</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="modal-actions"><span id="viewall-count" class="tag">—</span></div>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>

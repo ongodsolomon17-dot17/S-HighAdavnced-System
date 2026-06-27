@@ -45,7 +45,79 @@ function hideSplash() {
 }
 hideSplash();
 
-// ===== Sound Engine =========================================================
+// ===== Action Overlay =======================================================
+// Shows a splash-style processing screen during key commands (check-in/out,
+// add/update/delete staff). The S in the avatar slot is replaced with the
+// user's own profile picture or company logo as soon as they log in.
+const ActionOverlay = {
+  _el:     null,
+  _avatar: null,
+  _label:  null,
+  _ok:     null,
+  _fail:   null,
+  _timer:  null,
+
+  init() {
+    this._el     = document.getElementById("action-overlay");
+    this._avatar = document.getElementById("ao-avatar");
+    this._label  = document.getElementById("ao-label");
+    this._ok     = document.getElementById("ao-success");
+    this._fail   = document.getElementById("ao-fail");
+  },
+
+  // Call once after login to set the avatar content
+  setAvatar(src) {
+    if (!this._avatar) return;
+    if (src && src.startsWith("data:")) {
+      this._avatar.innerHTML = `<img src="${src}" alt="profile">`;
+    } else if (src) {
+      this._avatar.textContent = src.charAt(0).toUpperCase();
+    }
+    // else keep the default "S"
+  },
+
+  // Run an async command with the overlay.
+  // usage: await ActionOverlay.run("Checking in...", () => apiFetch(...))
+  async run(label, fn) {
+    if (!this._el) this.init();
+    clearTimeout(this._timer);
+    this._reset();
+    this._label.textContent = label || "Processing…";
+    this._el.classList.add("visible");
+    let ok = false;
+    try {
+      await fn();
+      ok = true;
+    } catch (err) {
+      // re-throw so callers can still catch and show toasts
+      this._resolve(false);
+      throw err;
+    }
+    this._resolve(true);
+  },
+
+  _resolve(success) {
+    const result = success ? this._ok : this._fail;
+    this._label.textContent = success ? "Done" : "Failed";
+    if (result) result.classList.add("show");
+    // Hide the spinning rings visually once we have an outcome
+    const rings = this._el.querySelectorAll(".ao-ring, .ao-ring-2");
+    rings.forEach(r => { r.style.opacity = "0"; r.style.transition = "opacity 0.2s"; });
+    this._timer = setTimeout(() => this._hide(), 1100);
+  },
+
+  _reset() {
+    [this._ok, this._fail].forEach(el => { if (el) el.classList.remove("show"); });
+    const rings = this._el.querySelectorAll(".ao-ring, .ao-ring-2");
+    rings.forEach(r => { r.style.opacity = ""; r.style.transition = ""; });
+  },
+
+  _hide() {
+    if (this._el) this._el.classList.remove("visible");
+    setTimeout(() => this._reset(), 300);
+  },
+};
+
 // ===== Sound Engine =========================================================
 // Named tone presets. Each entry: [freq, waveType, volume, duration, label]
 const TONE_PRESETS = {
@@ -296,6 +368,8 @@ function applyBranding(pictureUrl) {
     if (pictureUrl) preview.innerHTML = `<img src="${pictureUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
     else preview.innerHTML = "S";
   }
+  // Keep the action overlay avatar in sync with the profile picture
+  ActionOverlay.setAvatar(pictureUrl || "S");
 }
 
 async function loadBranding() {
@@ -503,28 +577,88 @@ function applyScheduleDisplay() {
   if (el && sched.checkin_time) {
     el.textContent = `⏰ ${sched.checkin_time}–${sched.checkout_time}`;
   }
-  if (sched.night_checkin_time) {
-    document.getElementById("shift-selector")?.classList.remove("hidden");
-  }
-  // Show/hide clock-out button based on admin setting
+  // Only show the shift selector row if a night shift time is configured
+  const hasNight = !!sched.night_checkin_time;
+  document.getElementById("shift-selector")?.classList.toggle("hidden", !hasNight);
+
+  // Clock-out visibility depends on selected shift's clockout_enabled setting
+  updateClockoutVisibility(sched);
+}
+
+function updateClockoutVisibility(sched) {
+  sched = sched || JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
   const coBtn = document.getElementById("btn-staff-checkout");
-  if (coBtn) {
-    const show = sched.clockout_enabled !== false;
-    coBtn.style.display = show ? "" : "none";
-  }
+  if (!coBtn) return;
+  const show = selectedShift === "night"
+    ? sched.night_clockout_enabled !== false
+    : sched.clockout_enabled !== false;
+  coBtn.style.display = show ? "" : "none";
 }
 
 function selectShift(shift) {
   selectedShift = shift;
-  document.getElementById("shift-btn-day").classList.toggle("active",   shift === "day");
-  document.getElementById("shift-btn-night").classList.toggle("active", shift === "night");
-  // Update clock-out visibility based on shift
-  const sched = JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
-  const coBtn = document.getElementById("btn-staff-checkout");
-  if (coBtn) {
-    const show = shift === "day" ? sched.clockout_enabled !== false : sched.night_clockout_enabled !== false;
-    coBtn.style.display = show ? "" : "none";
+  document.getElementById("shift-btn-day")?.classList.toggle("active",   shift === "day");
+  document.getElementById("shift-btn-night")?.classList.toggle("active", shift === "night");
+  updateClockoutVisibility();
+}
+
+async function staffSelfRecord(action) {
+  const sched    = JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
+  const hasNight = !!sched.night_checkin_time;
+
+  // If night shift is configured, always ask which shift before proceeding
+  if (hasNight) {
+    await new Promise((resolve) => {
+      openModal("shift-select-modal");
+      document.getElementById("shift-modal-day").onclick = () => {
+        selectShift("day");
+        closeModal();
+        resolve();
+      };
+      document.getElementById("shift-modal-night").onclick = () => {
+        selectShift("night");
+        closeModal();
+        resolve();
+      };
+    });
+    // After shift is selected, re-check clockout visibility and enforce it
+    const coBtn = document.getElementById("btn-staff-checkout");
+    if (action === "check_out" && coBtn && coBtn.style.display === "none") {
+      showToast("Clock-out is disabled for this shift.", "error");
+      return;
+    }
   }
+
+  const staffId = Auth.staffId;
+  if (!staffId) { showToast("No staff ID linked.", "error"); return; }
+
+  let lat = null, lng = null;
+  if (staffGeoPos) { lat = staffGeoPos.coords.latitude; lng = staffGeoPos.coords.longitude; }
+
+  const geofence = JSON.parse(sessionStorage.getItem("att_geofence") || "{}");
+  if (geofence.enabled && geofence.lat && lat) {
+    const dist = haversineM(geofence.lat, geofence.lng, lat, lng);
+    if (dist > geofence.radius) {
+      showToast(`Unable to ${action === "check_in" ? "clock in" : "clock out"} — location mismatch (${Math.round(dist)}m away).`, "error");
+      return;
+    }
+  }
+
+  const btn = document.getElementById(action === "check_in" ? "btn-staff-checkin" : "btn-staff-checkout");
+  if (btn) btn.disabled = true;
+  try {
+    const label = action === "check_in" ? "Clocking in…" : "Clocking out…";
+    await ActionOverlay.run(label, async () => {
+      await apiFetch("/attendance", { method: "POST", body: JSON.stringify({
+        action, lat, lng,
+        shift: hasNight ? selectedShift : null
+      })});
+    });
+    showToast(`${action === "check_in" ? "Clocked in" : "Clocked out"} successfully!`, "success");
+    loadStaffSummary("daily");
+    pushToIntegration({ staff_id: staffId, action, timestamp: new Date().toISOString(), lat, lng });
+  } catch (err) { showToast(err.message, "error"); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 // ===== Password Strength ====================================================
@@ -1128,27 +1262,63 @@ function sanitize(str, maxLen=120) { return !str ? "" : String(str).replace(/<[^
 
 async function addStaff(name, email, phone) {
   const id = generateStaffId();
-  await apiFetch("/staff", { method: "POST", body: JSON.stringify({ id, name, email, phone }) });
-  showToast(`Staff '${name}' added (${id})`, "success");
-  refreshDisplay();
+  await ActionOverlay.run("Adding staff…", async () => {
+    await apiFetch("/staff", { method: "POST", body: JSON.stringify({ id, name, email, phone }) });
+    showToast(`Staff '${name}' added (${id})`, "success");
+    refreshDisplay();
+  });
 }
 async function updateStaff(id, name, email, phone) {
-  await apiFetch(`/staff/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ name, email, phone }) });
-  showToast(`Staff '${id}' updated`, "success"); refreshDisplay();
+  await ActionOverlay.run("Updating staff…", async () => {
+    await apiFetch(`/staff/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ name, email, phone }) });
+    showToast(`Staff '${id}' updated`, "success"); refreshDisplay();
+  });
 }
 async function removeStaff(id) {
   if (!confirm(`Remove staff '${id}'?`)) return;
-  await apiFetch(`/staff/${encodeURIComponent(id)}`, { method: "DELETE" });
-  showToast(`Staff '${id}' removed`, "success"); refreshDisplay();
+  await ActionOverlay.run("Removing staff…", async () => {
+    await apiFetch(`/staff/${encodeURIComponent(id)}`, { method: "DELETE" });
+    showToast(`Staff '${id}' removed`, "success"); refreshDisplay();
+  });
 }
 
 // ===== Attendance ===========================================================
-async function recordAttendance(type, staffId, lat, lng) {
+async function recordAttendance(type, staffId, lat, lng, force = false) {
+  const label = type === "check_in" ? "Checking in…" : "Checking out…";
   const body = { staff_id: staffId, action: type };
   if (lat != null) body.lat = lat;
   if (lng != null) body.lng = lng;
-  await apiFetch("/attendance", { method: "POST", body: JSON.stringify(body) });
-  showToast(`${staffId} ${type === "check_in" ? "checked in" : "checked out"}`, "success");
+  if (force)       body.force = true;
+
+  let res;
+  await ActionOverlay.run(label, async () => {
+    res = await apiFetch("/attendance", { method: "POST", body: JSON.stringify(body) });
+  });
+
+  // Server returns a soft warning instead of a hard block when admin's
+  // staff member is outside the geofence — show the confirm popup.
+  if (res && res.location_warning) {
+    return new Promise((resolve) => {
+      const msg = res.message || "Staff location does not match the set location.";
+      document.getElementById("geo-warn-msg").textContent = msg;
+      document.getElementById("geo-warn-lat").textContent  = lat != null ? `${(+lat).toFixed(6)}, ${(+lng).toFixed(6)}` : "Not available";
+      document.getElementById("geo-warn-modal").classList.remove("hidden");
+      document.getElementById("modal-overlay").classList.remove("hidden");
+
+      document.getElementById("geo-warn-proceed").onclick = async () => {
+        closeModal();
+        await recordAttendance(type, staffId, lat, lng, true);
+        resolve();
+      };
+      document.getElementById("geo-warn-abort").onclick = () => {
+        closeModal();
+        showToast("Check-in aborted.", "error");
+        resolve();
+      };
+    });
+  }
+
+  showToast(`${staffId} ${type === "check_in" ? "checked in" : "checked out"} ✅`, "success");
   refreshDisplay();
   pushToIntegration({ staff_id: staffId, action: type, timestamp: new Date().toISOString(), lat, lng });
 }
@@ -1320,23 +1490,62 @@ function renderReportTable(data) {
   document.getElementById("report-count").textContent = `${data.length} records`;
 }
 function exportExcel(data, filename) {
-  const rows = [["Date","Staff ID","Name","Action","Time","Status","Lat","Lng"]];
+  const rows = [["Date","Staff ID","Name","Action","Shift","Time","Status","Lat","Lng"]];
   (data||_reportData).forEach(r => {
     const date = new Date(r.timestamp+"Z");
-    rows.push([date.toLocaleDateString(),r.staff_id,r.name||"",r.action,date.toLocaleTimeString(),r.punctuality_grade||"",r.lat||"",r.lng||""]);
+    rows.push([
+      date.toLocaleDateString(),
+      r.staff_id,
+      r.name||"",
+      r.action==="check_in" ? "Check In" : "Check Out",
+      r.shift_type ? (r.shift_type==="night" ? "Night" : "Day") : "—",
+      date.toLocaleTimeString(),
+      r.punctuality_grade||"—",
+      r.lat!=null ? (+r.lat).toFixed(6) : "—",
+      r.lng!=null ? (+r.lng).toFixed(6) : "—",
+    ]);
   });
   const ws = XLSX.utils.aoa_to_sheet(rows);
+  // Auto-width columns
+  const colWidths = rows[0].map((_,i) => ({ wch: Math.max(...rows.map(r => String(r[i]||"").length)) + 2 }));
+  ws["!cols"] = colWidths;
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,"Attendance");
+  XLSX.utils.book_append_sheet(wb, ws, "Attendance");
   XLSX.writeFile(wb, filename||"attendance-report.xlsx");
 }
 function exportPDF(data) {
   const rows = data||_reportData;
   const win  = window.open("","_blank");
   win.document.write(`<!DOCTYPE html><html><head><title>Attendance Report</title>
-<style>body{font-family:sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px 10px;font-size:12px}th{background:#eee}</style></head>
-<body><h2>Attendance Report</h2><table><thead><tr><th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Time</th><th>Status</th></tr></thead><tbody>
-${rows.map(r=>{const d=new Date(r.timestamp+"Z");return`<tr><td>${d.toLocaleDateString()}</td><td>${r.staff_id}</td><td>${r.name||""}</td><td>${r.action}</td><td>${d.toLocaleTimeString()}</td><td>${r.punctuality_grade||""}</td></tr>`;}).join("")}</tbody></table></body></html>`);
+<style>
+  body{font-family:sans-serif;padding:24px;color:#222}
+  h2{margin-bottom:4px}p.sub{color:#666;font-size:13px;margin-bottom:16px}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:1px solid #ccc;padding:6px 10px;font-size:11px;text-align:left}
+  th{background:#f0f0f0;font-weight:600}
+  tr:nth-child(even){background:#fafafa}
+</style></head>
+<body>
+<h2>Attendance Report</h2>
+<p class="sub">Generated: ${new Date().toLocaleString()}</p>
+<table><thead><tr>
+  <th>Date</th><th>Staff ID</th><th>Name</th><th>Action</th><th>Shift</th><th>Time</th><th>Status</th><th>Lat</th><th>Lng</th>
+</tr></thead><tbody>
+${rows.map(r => {
+  const d = new Date(r.timestamp+"Z");
+  return `<tr>
+    <td>${d.toLocaleDateString()}</td>
+    <td>${r.staff_id||""}</td>
+    <td>${r.name||""}</td>
+    <td>${r.action==="check_in"?"Check In":"Check Out"}</td>
+    <td>${r.shift_type?(r.shift_type==="night"?"Night":"Day"):"—"}</td>
+    <td>${d.toLocaleTimeString()}</td>
+    <td>${r.punctuality_grade||"—"}</td>
+    <td>${r.lat!=null?(+r.lat).toFixed(6):"—"}</td>
+    <td>${r.lng!=null?(+r.lng).toFixed(6):"—"}</td>
+  </tr>`;
+}).join("")}
+</tbody></table></body></html>`);
   win.document.close(); win.print();
 }
 
@@ -1386,27 +1595,7 @@ function renderStaffQR() {
 }
 
 // ===== Staff self-record ====================================================
-async function staffSelfRecord(action) {
-  const staffId = Auth.staffId;
-  if (!staffId) { showToast("No staff ID linked.", "error"); return; }
-  let lat = null, lng = null;
-  if (staffGeoPos) { lat = staffGeoPos.coords.latitude; lng = staffGeoPos.coords.longitude; }
-  const geofence = JSON.parse(sessionStorage.getItem("att_geofence") || "{}");
-  if (geofence.enabled && geofence.lat && lat) {
-    const dist = haversineM(geofence.lat, geofence.lng, lat, lng);
-    if (dist > geofence.radius) { showToast(`Unable to ${action==="check_in"?"clock in":"clock out"} due to location mismatch.`, "error"); return; }
-  }
-  const sched = JSON.parse(sessionStorage.getItem("att_schedule") || "{}");
-  const btn = document.getElementById(action==="check_in"?"btn-staff-checkin":"btn-staff-checkout");
-  btn.disabled = true;
-  try {
-    await apiFetch("/attendance", { method: "POST", body: JSON.stringify({ action, lat, lng, shift: sched.night_checkin_time ? selectedShift : null }) });
-    showToast(`${action==="check_in"?"Clocked in":"Clocked out"} successfully! 🎉`, "success");
-    loadStaffSummary("daily");
-    pushToIntegration({ staff_id: staffId, action, timestamp: new Date().toISOString(), lat, lng });
-  } catch (err) { showToast(err.message, "error"); }
-  finally { btn.disabled = false; }
-}
+// staffSelfRecord is defined in the Shift selection section above
 
 function haversineM(lat1,lng1,lat2,lng2) {
   const R=6371000,dLat=(lat2-lat1)*Math.PI/180,dLng=(lng2-lng1)*Math.PI/180;
@@ -1647,6 +1836,7 @@ document.getElementById("slogin-password")?.addEventListener("keydown", e=>{ if(
 })();
 
 // ===== Init =================================================================
+ActionOverlay.init();
 if (Auth.isLoggedIn()) {
   if (Auth.role === "staff") showStaffShell();
   else showAppShell();

@@ -693,6 +693,7 @@ def init_db():
         ("users", "checkout_time",   "TEXT DEFAULT '17:00'"),
         ("attendance", "lat",        "DOUBLE PRECISION"),
         ("attendance", "lng",        "DOUBLE PRECISION"),
+        ("attendance", "shift_type", "TEXT"),
     ]
     for table, col, definition in migrations:
         try:
@@ -1459,9 +1460,10 @@ def record_attendance():
     else:
         staff_id = validate_staff_id(data.get("staff_id"))
 
-    action = sanitize(data.get("action"), 20, "action")
-    lat    = data.get("lat")
-    lng    = data.get("lng")
+    action     = sanitize(data.get("action"), 20, "action")
+    lat        = data.get("lat")
+    lng        = data.get("lng")
+    shift_type = sanitize(data.get("shift"), 10, "shift") if data.get("shift") in ("day", "night") else None
 
     if action not in VALID_ACTIONS:
         abort(400, description=f"'action' must be one of: {', '.join(VALID_ACTIONS)}.")
@@ -1486,14 +1488,30 @@ def record_attendance():
                      FROM users WHERE id=%s""", (current["sub"],))
         settings = c.fetchone()
 
-        # Geofence check — applies to ALL roles
+        # Geofence check
+        location_warning = None
         if settings and settings.get("geofence_enabled") and settings["geofence_lat"] and lat is not None and lng is not None:
             dist = haversine_m(
                 settings["geofence_lat"], settings["geofence_lng"],
                 lat, lng
             )
             if dist > settings["geofence_radius"]:
-                abort(403, description=f"Unable to {action.replace('_',' ')} due to location mismatch. You are {int(dist)}m away (allowed: {settings['geofence_radius']}m).")
+                if current.get("role") == "admin":
+                    # Admins can override the geofence — but only if they
+                    # explicitly pass force=true after seeing the warning.
+                    # Without it return a warning response so the frontend
+                    # can show the "Location mismatch — proceed anyway?" popup.
+                    if not data.get("force"):
+                        conn.close()
+                        return jsonify({
+                            "location_warning": True,
+                            "distance": int(dist),
+                            "allowed":  settings["geofence_radius"],
+                            "message":  f"Staff location is {int(dist)}m away from the set location (allowed: {settings['geofence_radius']}m)."
+                        }), 200
+                    # force=true: admin confirmed — fall through and record
+                else:
+                    abort(403, description=f"Unable to {action.replace('_',' ')} due to location mismatch. You are {int(dist)}m away (allowed: {settings['geofence_radius']}m).")
 
         if not staff_exists(conn, current["sub"], staff_id):
             abort(404, description=f"Staff '{staff_id}' not found.")
@@ -1537,8 +1555,8 @@ def record_attendance():
 
         timestamp = datetime.utcnow().isoformat()
         c.execute(
-            "INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng) VALUES (%s,%s,%s,%s,%s,%s)",
-            (current["sub"], staff_id, action, timestamp, lat, lng)
+            "INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng, shift_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (current["sub"], staff_id, action, timestamp, lat, lng, shift_type)
         )
         conn.commit()
     finally:
@@ -1898,7 +1916,8 @@ def report_attendance():
         # every colleague's attendance + GPS history.
         staff_filter = current.get("staff_id")
     query = """
-        SELECT a.id, a.staff_id, s.name, a.action, a.timestamp, a.lat, a.lng
+        SELECT a.id, a.staff_id, s.name, a.action, a.timestamp, a.lat, a.lng,
+               a.shift_type
         FROM attendance a
         LEFT JOIN staff s ON s.id=a.staff_id AND s.user_id=a.user_id
         WHERE a.user_id=%s AND a.timestamp >= %s AND a.timestamp <= %s
