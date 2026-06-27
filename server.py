@@ -2373,7 +2373,7 @@ def trust_device():
         conn.close()
         abort(400, description=f"Max trusted devices limit ({max_d}) reached. Revoke an existing device first.")
 
-    # Admin rows have staff_id=NULL. Postgres treats NULL!=NULL in UNIQUE
+    # Admin"s rows have staff_id=NULL. Postgres treats NULL!=NULL in UNIQUE
     # constraints, so a plain ON CONFLICT (user_id, role, staff_id,
     # device_fingerprint) would never match an admin row and would insert a
     # duplicate instead of updating. Use a partial index conflict target

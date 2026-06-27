@@ -80,16 +80,21 @@ const ActionOverlay = {
   // usage: await ActionOverlay.run("Checking in...", () => apiFetch(...))
   async run(label, fn) {
     if (!this._el) this.init();
+    // If the overlay element still doesn't exist in the DOM (e.g. old
+    // index.html is cached on Vercel), skip the overlay entirely and
+    // just run the function — no crash, no visual feedback until the
+    // new HTML is deployed.
+    if (!this._el) {
+      await fn();
+      return;
+    }
     clearTimeout(this._timer);
     this._reset();
-    this._label.textContent = label || "Processing…";
+    if (this._label) this._label.textContent = label || "Processing…";
     this._el.classList.add("visible");
-    let ok = false;
     try {
       await fn();
-      ok = true;
     } catch (err) {
-      // re-throw so callers can still catch and show toasts
       this._resolve(false);
       throw err;
     }
