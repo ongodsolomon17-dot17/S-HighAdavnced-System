@@ -703,19 +703,52 @@ def init_db():
             conn.rollback()
             print(f"[MIGRATION] Warning: could not add {table}.{col}: {e}", flush=True)
 
-    # Fix: original UNIQUE constraint predates staff_id, so two different
-    # staff members sharing the same fingerprint (same phone model, same
-    # shared kiosk device, etc.) collide and silently lose pending requests.
+    # Fix 1: Drop the old constraint that predated staff_id so staff members
+    # on the same device model no longer collide.
     try:
         c.execute("ALTER TABLE trusted_devices DROP CONSTRAINT IF EXISTS trusted_devices_user_id_role_device_fingerprint_key")
-        c.execute("""
-            ALTER TABLE trusted_devices
-            ADD CONSTRAINT trusted_devices_user_role_staff_fp_key
-            UNIQUE (user_id, role, staff_id, device_fingerprint)
-        """)
+        c.execute("ALTER TABLE trusted_devices DROP CONSTRAINT IF EXISTS trusted_devices_user_role_staff_fp_key")
         conn.commit()
     except Exception:
         conn.rollback()
+
+    # Fix 2: Clean up phantom duplicate admin rows accumulated by the old
+    # insert bug (NULL != NULL in UNIQUE constraints meant ON CONFLICT never
+    # fired for admin rows, so every login inserted a fresh row instead of
+    # updating — inflating the count until it hit max_devices).
+    # Keep only the most-recently-used row per (user_id, role, fingerprint)
+    # for admin rows (staff_id IS NULL).
+    try:
+        c.execute("""
+            DELETE FROM trusted_devices
+            WHERE staff_id IS NULL
+              AND id NOT IN (
+                SELECT DISTINCT ON (user_id, role, device_fingerprint) id
+                FROM trusted_devices
+                WHERE staff_id IS NULL
+                ORDER BY user_id, role, device_fingerprint, last_used DESC NULLS LAST
+              )
+        """)
+        conn.commit()
+        print("[MIGRATION] Cleaned up duplicate admin device rows.", flush=True)
+    except Exception as e:
+        conn.rollback()
+        print(f"[MIGRATION] Warning: cleanup of duplicate admin rows failed: {e}", flush=True)
+
+    # Fix 3: Create a partial unique index for admin rows so ON CONFLICT
+    # works correctly despite staff_id being NULL (NULL != NULL in regular
+    # UNIQUE constraints, so a standard 4-column constraint doesn't work).
+    try:
+        c.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_trusted_devices_admin_fp
+            ON trusted_devices (user_id, role, device_fingerprint)
+            WHERE staff_id IS NULL
+        """)
+        conn.commit()
+        print("[MIGRATION] Partial index for admin device rows created.", flush=True)
+    except Exception as e:
+        conn.rollback()
+        print(f"[MIGRATION] Warning: partial index creation failed: {e}", flush=True)
 
     conn.commit()
     conn.close()

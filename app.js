@@ -97,16 +97,17 @@ const ActionOverlay = {
   },
 
   _resolve(success) {
+    if (!this._el) return;
     const result = success ? this._ok : this._fail;
     this._label.textContent = success ? "Done" : "Failed";
     if (result) result.classList.add("show");
-    // Hide the spinning rings visually once we have an outcome
     const rings = this._el.querySelectorAll(".ao-ring, .ao-ring-2");
     rings.forEach(r => { r.style.opacity = "0"; r.style.transition = "opacity 0.2s"; });
     this._timer = setTimeout(() => this._hide(), 1100);
   },
 
   _reset() {
+    if (!this._el) return;
     [this._ok, this._fail].forEach(el => { if (el) el.classList.remove("show"); });
     const rings = this._el.querySelectorAll(".ao-ring, .ao-ring-2");
     rings.forEach(r => { r.style.opacity = ""; r.style.transition = ""; });
