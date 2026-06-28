@@ -605,6 +605,16 @@ def init_db():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS notice_reads (
+            id         SERIAL PRIMARY KEY,
+            notice_id  INTEGER NOT NULL REFERENCES notices(id) ON DELETE CASCADE,
+            staff_id   TEXT    NOT NULL,
+            read_at    TEXT    NOT NULL,
+            UNIQUE (notice_id, staff_id)
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS trusted_devices (
             id                  SERIAL PRIMARY KEY,
             user_id             INTEGER NOT NULL,
@@ -2036,16 +2046,51 @@ def superadmin_delete_user(user_id):
 # ===== Notice Board =========================================================
 @app.route("/notices", methods=["GET"])
 def get_notices():
-    current = get_current_user()
+    current  = get_current_user()
+    staff_id = current.get("staff_id")
+    conn = get_db()
+    c    = conn.cursor()
+
+    if staff_id:
+        # Staff: return all notices with a per-staff read flag
+        c.execute("""
+            SELECT n.id, n.title, n.body, n.created_at, n.pinned,
+                   (r.id IS NOT NULL) AS read
+            FROM notices n
+            LEFT JOIN notice_reads r
+              ON r.notice_id=n.id AND r.staff_id=%s
+            WHERE n.user_id=%s
+            ORDER BY n.pinned DESC, n.created_at DESC
+        """, (staff_id, current["sub"]))
+    else:
+        # Admin: no read tracking needed
+        c.execute("""
+            SELECT id, title, body, created_at, pinned, FALSE AS read
+            FROM notices WHERE user_id=%s ORDER BY pinned DESC, created_at DESC LIMIT 20
+        """, (current["sub"],))
+
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route("/notices/<int:nid>/read", methods=["POST"])
+def mark_notice_read(nid):
+    """Staff marks a notice as read."""
+    current  = get_current_user()
+    staff_id = current.get("staff_id")
+    if not staff_id:
+        abort(403, description="Staff only.")
     conn = get_db()
     c    = conn.cursor()
     c.execute("""
-        SELECT id, title, body, created_at, pinned
-        FROM notices WHERE user_id=%s ORDER BY pinned DESC, created_at DESC LIMIT 20
-    """, (current["sub"],))
-    rows = c.fetchall()
+        INSERT INTO notice_reads (notice_id, staff_id, read_at)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (notice_id, staff_id) DO NOTHING
+    """, (nid, staff_id, datetime.utcnow().isoformat()))
+    conn.commit()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify({"ok": True})
 
 @app.route("/notices", methods=["POST"])
 def post_notice():
@@ -2267,6 +2312,25 @@ def verify_device():
             conn.commit()
             conn.close()
             return jsonify({"status": "trusted", "device_id": row["id"]})
+
+        # Device not found — check if the max_devices limit is already
+        # reached BEFORE returning "unknown". If it is, block immediately
+        # so the trust-device modal never even appears.
+        c.execute("SELECT max_devices FROM users WHERE id=%s", (current["sub"],))
+        u     = c.fetchone()
+        max_d = (u["max_devices"] if u else 3) or 3
+        c.execute("""
+            SELECT COUNT(*) AS n FROM trusted_devices
+            WHERE user_id=%s AND role='admin' AND status='trusted'
+        """, (current["sub"],))
+        cur_count = c.fetchone()["n"]
+        if cur_count >= max_d:
+            conn.close()
+            return jsonify({
+                "status": "rejected",
+                "reason": f"Max trusted device limit ({max_d}) reached. Ask your admin to revoke an existing device first."
+            })
+
         conn.close()
         return jsonify({"status": "unknown"})
 

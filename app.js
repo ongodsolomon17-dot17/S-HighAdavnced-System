@@ -439,7 +439,7 @@ function showAppShell() {
   loadPendingDevices();
 }
 
-function showStaffShell() {
+async function showStaffShell() {
   document.getElementById("auth-shell").classList.add("hidden");
   document.getElementById("app-shell").classList.add("hidden");
   document.getElementById("staff-shell").classList.remove("hidden");
@@ -450,6 +450,25 @@ function showStaffShell() {
   loadStaffSummary("daily");
   startStaffGeoWatch();
   loadStaffNotices();
+
+  // Fetch fresh schedule so shift selector and clock-out visibility
+  // are correct even on page refresh (sessionStorage is cleared on logout)
+  try {
+    const profile = await apiFetch("/auth/profile");
+    const sched = {
+      checkin_time:           profile.checkin_time,
+      checkout_time:          profile.checkout_time,
+      night_checkin_time:     profile.night_checkin_time,
+      night_checkout_time:    profile.night_checkout_time,
+      clockout_enabled:       profile.clockout_enabled,
+      night_clockout_enabled: profile.night_clockout_enabled,
+      sound_enabled:          profile.sound_enabled,
+    };
+    sessionStorage.setItem("att_schedule", JSON.stringify(sched));
+  } catch (_) {}
+
+  // Apply AFTER fetch so shift selector and clock-out button
+  // reflect the actual schedule, not an empty/stale cache
   applyScheduleDisplay();
   applySoundSettings(JSON.parse(sessionStorage.getItem("att_schedule") || "{}").sound_enabled ?? true);
 }
@@ -1031,16 +1050,100 @@ async function loadStaffNotices() {
   try {
     const notices = await apiFetch("/notices");
     const bar = document.getElementById("staff-notices-bar");
-    if (!bar || !notices.length) return;
+    if (!bar) return;
+    if (!notices.length) { bar.style.display = "none"; return; }
+
+    const unread = notices.filter(n => !n.read);
+    const latest = notices.slice(0, 3);
+
+    // Mark the first 3 as read immediately (they're now visible)
+    latest.filter(n => !n.read).forEach(n => {
+      apiFetch(`/notices/${n.id}/read`, { method: "POST" }).catch(() => {});
+    });
+
+    const badge = unread.length > 0
+      ? `<span style="
+          display:inline-flex;align-items:center;justify-content:center;
+          min-width:20px;height:20px;padding:0 5px;
+          background:var(--danger);color:#fff;
+          font-size:10px;font-weight:800;border-radius:10px;
+          margin-left:6px;font-variant-numeric:tabular-nums
+        ">${unread.length > 99 ? "99+" : unread.length}</span>`
+      : "";
+
     bar.style.display = "block";
-    bar.innerHTML = notices.slice(0,3).map(n => `
-      <div style="padding:10px 16px;border-radius:10px;margin-bottom:8px;
-                  background:rgba(63,193,201,0.08);border:1px solid rgba(63,193,201,0.2)">
-        ${n.pinned ? '📌 ' : '📢 '}<strong>${esc(n.title)}</strong>
-        <span style="margin-left:8px;font-size:12px;color:var(--text-muted)">${esc(n.body)}</span>
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  margin-bottom:10px">
+        <h3 style="margin:0;font-size:0.95rem;font-weight:700;color:var(--text)">
+          Notices
+        </h3>
+        <button onclick="viewAllStaffNotices()" style="
+          display:inline-flex;align-items:center;
+          background:rgba(63,193,201,0.12);border:1px solid rgba(63,193,201,0.3);
+          color:var(--accent);border-radius:10px;padding:5px 12px;
+          font-size:12px;font-weight:700;cursor:pointer
+        ">View All${badge}</button>
       </div>
-    `).join("");
+      ${latest.map(n => `
+        <div style="
+          padding:10px 14px;border-radius:10px;margin-bottom:8px;
+          background:rgba(63,193,201,0.06);border:1px solid rgba(63,193,201,${n.read ? '0.12' : '0.3'});
+          opacity:${n.read ? '0.8' : '1'};
+        ">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+            ${n.pinned ? '<span style="font-size:11px;font-weight:700;color:var(--accent)">PINNED</span>' : ''}
+            ${!n.read ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--danger);display:inline-block;flex-shrink:0"></span>' : ''}
+            <strong style="font-size:13px;color:var(--text)">${esc(n.title)}</strong>
+          </div>
+          <p style="margin:0;font-size:12px;color:var(--text-muted);
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${esc(n.body)}
+          </p>
+        </div>
+      `).join("")}
+    `;
   } catch (_) {}
+}
+
+let _allStaffNotices = [];
+async function viewAllStaffNotices() {
+  try {
+    const notices = await apiFetch("/notices");
+    _allStaffNotices = notices;
+
+    // Mark all as read
+    notices.filter(n => !n.read).forEach(n => {
+      apiFetch(`/notices/${n.id}/read`, { method: "POST" }).catch(() => {});
+    });
+
+    const modal = document.getElementById("staff-notices-modal");
+    if (!modal) return;
+    document.getElementById("staff-notices-modal-body").innerHTML = notices.length
+      ? notices.map(n => `
+          <div style="
+            padding:14px;border-radius:12px;margin-bottom:10px;
+            background:rgba(63,193,201,0.06);border:1px solid rgba(63,193,201,${n.read?'0.12':'0.3'})
+          ">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+              ${n.pinned ? '<span style="font-size:11px;font-weight:700;color:var(--accent);border:1px solid var(--accent);padding:1px 6px;border-radius:6px">PINNED</span>' : ''}
+              ${!n.read ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--danger);display:inline-block"></span>' : ''}
+              <strong style="font-size:14px;color:var(--text)">${esc(n.title)}</strong>
+              <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">
+                ${new Date(n.created_at+"Z").toLocaleDateString()}
+              </span>
+            </div>
+            <p style="margin:0;font-size:13px;color:var(--text-muted);line-height:1.5">
+              ${esc(n.body)}
+            </p>
+          </div>
+        `).join("")
+      : '<p style="color:var(--text-muted);text-align:center">No notices yet.</p>';
+
+    openModal("staff-notices-modal");
+    // Refresh the notices bar to clear the unread badge
+    setTimeout(loadStaffNotices, 500);
+  } catch (err) { showToast(err.message, "error"); }
 }
 
 // ===== Feedback =============================================================
