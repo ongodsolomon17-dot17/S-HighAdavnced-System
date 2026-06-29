@@ -736,6 +736,19 @@ def init_db():
         conn.rollback()
         print(f"[MIGRATION] Warning: partial index: {e}", flush=True)
 
+    # Drop the incorrectly-spelled duplicate tables that were created by an
+    # earlier deployment before table names were corrected. The real tables
+    # with actual data use the names in init_db above. These duplicates are
+    # empty and safe to drop.
+    for ghost_table in ("login_attempts", "external_integrations"):
+        try:
+            c.execute(f"DROP TABLE IF EXISTS {ghost_table}")
+            conn.commit()
+            print(f"[MIGRATION] Dropped ghost table '{ghost_table}'.", flush=True)
+        except Exception as e:
+            conn.rollback()
+            print(f"[MIGRATION] Warning: could not drop '{ghost_table}': {e}", flush=True)
+
     conn.commit()
     conn.close()
 
