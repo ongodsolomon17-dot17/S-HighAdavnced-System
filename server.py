@@ -713,8 +713,10 @@ def init_db():
             conn.rollback()
             print(f"[MIGRATION] Warning: could not add {table}.{col}: {e}", flush=True)
 
-    # Fix 1: Drop the old constraint that predated staff_id so staff members
-    # on the same device model no longer collide.
+    # Drop old constraints and create a safe partial unique index for admin
+    # rows so ON CONFLICT works despite staff_id being NULL.
+    # NOTE: we do NOT delete any existing rows — the previous migration that
+    # did a DELETE was too aggressive and wiped legitimate trusted devices.
     try:
         c.execute("ALTER TABLE trusted_devices DROP CONSTRAINT IF EXISTS trusted_devices_user_id_role_device_fingerprint_key")
         c.execute("ALTER TABLE trusted_devices DROP CONSTRAINT IF EXISTS trusted_devices_user_role_staff_fp_key")
@@ -722,32 +724,6 @@ def init_db():
     except Exception:
         conn.rollback()
 
-    # Fix 2: Clean up phantom duplicate admin rows accumulated by the old
-    # insert bug (NULL != NULL in UNIQUE constraints meant ON CONFLICT never
-    # fired for admin rows, so every login inserted a fresh row instead of
-    # updating — inflating the count until it hit max_devices).
-    # Keep only the most-recently-used row per (user_id, role, fingerprint)
-    # for admin rows (staff_id IS NULL).
-    try:
-        c.execute("""
-            DELETE FROM trusted_devices
-            WHERE staff_id IS NULL
-              AND id NOT IN (
-                SELECT DISTINCT ON (user_id, role, device_fingerprint) id
-                FROM trusted_devices
-                WHERE staff_id IS NULL
-                ORDER BY user_id, role, device_fingerprint, last_used DESC NULLS LAST
-              )
-        """)
-        conn.commit()
-        print("[MIGRATION] Cleaned up duplicate admin device rows.", flush=True)
-    except Exception as e:
-        conn.rollback()
-        print(f"[MIGRATION] Warning: cleanup of duplicate admin rows failed: {e}", flush=True)
-
-    # Fix 3: Create a partial unique index for admin rows so ON CONFLICT
-    # works correctly despite staff_id being NULL (NULL != NULL in regular
-    # UNIQUE constraints, so a standard 4-column constraint doesn't work).
     try:
         c.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_trusted_devices_admin_fp
@@ -755,10 +731,10 @@ def init_db():
             WHERE staff_id IS NULL
         """)
         conn.commit()
-        print("[MIGRATION] Partial index for admin device rows created.", flush=True)
+        print("[MIGRATION] Partial index for admin device rows OK.", flush=True)
     except Exception as e:
         conn.rollback()
-        print(f"[MIGRATION] Warning: partial index creation failed: {e}", flush=True)
+        print(f"[MIGRATION] Warning: partial index: {e}", flush=True)
 
     conn.commit()
     conn.close()
@@ -2304,7 +2280,8 @@ def verify_device():
         # Admins: simple trusted check, no expiry
         c.execute("""
             SELECT id, status FROM trusted_devices
-            WHERE user_id=%s AND role='admin' AND device_fingerprint=%s
+            WHERE user_id=%s AND role='admin'
+              AND device_fingerprint=%s AND staff_id IS NULL
         """, (current["sub"], fingerprint))
         row = c.fetchone()
         if row and row["status"] == "trusted":
@@ -2313,22 +2290,23 @@ def verify_device():
             conn.close()
             return jsonify({"status": "trusted", "device_id": row["id"]})
 
-        # Device not found — check if the max_devices limit is already
-        # reached BEFORE returning "unknown". If it is, block immediately
-        # so the trust-device modal never even appears.
+        # Device not found or not trusted — check max_devices limit before
+        # returning "unknown" (which would show the Trust Device? modal).
+        # If limit is reached, block immediately with a clear message.
         c.execute("SELECT max_devices FROM users WHERE id=%s", (current["sub"],))
         u     = c.fetchone()
         max_d = (u["max_devices"] if u else 3) or 3
         c.execute("""
             SELECT COUNT(*) AS n FROM trusted_devices
             WHERE user_id=%s AND role='admin' AND status='trusted'
+              AND staff_id IS NULL
         """, (current["sub"],))
         cur_count = c.fetchone()["n"]
         if cur_count >= max_d:
             conn.close()
             return jsonify({
                 "status": "rejected",
-                "reason": f"Max trusted device limit ({max_d}) reached. Ask your admin to revoke an existing device first."
+                "reason": f"Max trusted device limit ({max_d}) reached. Revoke an existing device in Settings first."
             })
 
         conn.close()
@@ -2442,15 +2420,41 @@ def trust_device():
     # device_fingerprint) would never match an admin row and would insert a
     # duplicate instead of updating. Use a partial index conflict target
     # that only applies to admin rows (WHERE staff_id IS NULL).
-    c.execute("""
-        INSERT INTO trusted_devices
-        (user_id, role, staff_id, device_fingerprint, device_name,
-         created_at, last_used, expires_at, status)
-        VALUES (%s, 'admin', NULL, %s, %s, %s, %s, NULL, 'trusted')
-        ON CONFLICT (user_id, role, device_fingerprint)
-        WHERE staff_id IS NULL
-        DO UPDATE SET last_used=%s, device_name=%s, status='trusted'
-    """, (current["sub"], fingerprint, device_name, now, now, now, device_name))
+    try:
+        # Use ON CONFLICT with the partial index (WHERE staff_id IS NULL).
+        # This requires idx_trusted_devices_admin_fp to exist (created in init_db).
+        c.execute("""
+            INSERT INTO trusted_devices
+            (user_id, role, staff_id, device_fingerprint, device_name,
+             created_at, last_used, expires_at, status)
+            VALUES (%s, 'admin', NULL, %s, %s, %s, %s, NULL, 'trusted')
+            ON CONFLICT (user_id, role, device_fingerprint)
+            WHERE staff_id IS NULL
+            DO UPDATE SET last_used=%s, device_name=%s, status='trusted'
+        """, (current["sub"], fingerprint, device_name, now, now, now, device_name))
+    except Exception:
+        # Fallback: partial index may not exist yet on this deployment.
+        # Check if a row exists and UPDATE it, otherwise INSERT fresh.
+        conn.rollback()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id FROM trusted_devices
+            WHERE user_id=%s AND role='admin' AND device_fingerprint=%s
+              AND staff_id IS NULL
+        """, (current["sub"], fingerprint))
+        existing = c.fetchone()
+        if existing:
+            c.execute("""
+                UPDATE trusted_devices SET last_used=%s, device_name=%s, status='trusted'
+                WHERE id=%s
+            """, (now, device_name, existing["id"]))
+        else:
+            c.execute("""
+                INSERT INTO trusted_devices
+                (user_id, role, staff_id, device_fingerprint, device_name,
+                 created_at, last_used, expires_at, status)
+                VALUES (%s, 'admin', NULL, %s, %s, %s, %s, NULL, 'trusted')
+            """, (current["sub"], fingerprint, device_name, now, now))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
