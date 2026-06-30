@@ -1976,6 +1976,8 @@ let _deferredInstallPrompt = null;
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   _deferredInstallPrompt = e;
+  document.getElementById("ios-install-banner")?.classList.add("hidden");
+  document.getElementById("manual-install-banner")?.classList.add("hidden");
   const btn = document.getElementById("btn-install-app");
   if (btn) btn.classList.remove("hidden");
 });
@@ -1989,9 +1991,38 @@ async function installApp() {
   if (btn) btn.classList.add("hidden");
 }
 window.addEventListener("appinstalled", () => {
-  const btn = document.getElementById("btn-install-app");
-  if (btn) btn.classList.add("hidden");
+  document.getElementById("btn-install-app")?.classList.add("hidden");
+  document.getElementById("ios-install-banner")?.classList.add("hidden");
+  document.getElementById("manual-install-banner")?.classList.add("hidden");
 });
+
+// Fallback install guidance for browsers that never fire beforeinstallprompt
+// (iOS Safari) or haven't fired it yet (some desktop browsers, or Chrome
+// before its engagement heuristics are satisfied). Skipped entirely if the
+// app is already running standalone (i.e. already installed).
+(function showInstallFallback() {
+  const isStandalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true; // iOS Safari's own flag
+  if (isStandalone) return;
+
+  const ua     = navigator.userAgent;
+  const isIOS  = /iPad|iPhone|iPod/.test(ua) || (ua.includes("Mac") && navigator.maxTouchPoints > 1);
+  const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+
+  if (isIOS && isSafari) {
+    document.getElementById("ios-install-banner")?.classList.remove("hidden");
+    return;
+  }
+
+  // Give Chrome/Edge/etc a few seconds to fire beforeinstallprompt on their
+  // own before falling back to manual instructions.
+  setTimeout(() => {
+    if (!_deferredInstallPrompt) {
+      document.getElementById("manual-install-banner")?.classList.remove("hidden");
+    }
+  }, 4000);
+})();
 
 ActionOverlay.init();
 if (Auth.isLoggedIn()) {
