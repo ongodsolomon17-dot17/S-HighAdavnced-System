@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, abort
+from werkzeug.exceptions import HTTPException
 from flask_cors import CORS
 import psycopg2
 import psycopg2.extras
@@ -1521,7 +1522,6 @@ def record_attendance():
         settings = c.fetchone()
 
         # Geofence check
-        location_warning = None
         if settings and settings.get("geofence_enabled") and settings["geofence_lat"] and lat is not None and lng is not None:
             dist = haversine_m(
                 settings["geofence_lat"], settings["geofence_lng"],
@@ -1534,7 +1534,11 @@ def record_attendance():
                     # Without it return a warning response so the frontend
                     # can show the "Location mismatch — proceed anyway?" popup.
                     if not data.get("force"):
-                        conn.close()
+                        # Don't close conn here — the outer finally handles
+                        # it. Closing twice was harmless on psycopg2 directly
+                        # but unsafe behind a connection pooler (e.g.
+                        # Supabase's PgBouncer), which is the likely cause
+                        # of force=true requests failing afterward.
                         return jsonify({
                             "location_warning": True,
                             "distance": int(dist),
@@ -1591,6 +1595,13 @@ def record_attendance():
             (current["sub"], staff_id, action, timestamp, lat, lng, shift_type)
         )
         conn.commit()
+    except HTTPException:
+        # Normal abort() calls (404/409/etc) — not a real error, just re-raise
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"[RECORD-ATTENDANCE] ERROR (staff_id={staff_id}, action={action}, force={data.get('force')}): {e}", flush=True)
+        raise
     finally:
         conn.close()
     return jsonify({"message": f"{staff_id} {action}", "timestamp": timestamp}), 201

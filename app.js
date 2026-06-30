@@ -1429,7 +1429,11 @@ async function recordAttendance(type, staffId, lat, lng, force = false) {
 
       document.getElementById("geo-warn-proceed").onclick = async () => {
         closeModal();
-        await recordAttendance(type, staffId, lat, lng, true);
+        try {
+          await recordAttendance(type, staffId, lat, lng, true);
+        } catch (err) {
+          showToast(err.message || "Failed to record attendance.", "error");
+        }
         resolve();
       };
       document.getElementById("geo-warn-abort").onclick = () => {
@@ -1958,6 +1962,37 @@ document.getElementById("slogin-password")?.addEventListener("keydown", e=>{ if(
 })();
 
 // ===== Init =================================================================
+
+// PWA: register service worker so the app becomes installable
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
+
+// PWA: capture the install prompt so we can trigger it from our own
+// "Install App" button instead of relying on the browser's default UI
+let _deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  const btn = document.getElementById("btn-install-app");
+  if (btn) btn.classList.remove("hidden");
+});
+async function installApp() {
+  if (!_deferredInstallPrompt) return;
+  _deferredInstallPrompt.prompt();
+  const { outcome } = await _deferredInstallPrompt.userChoice;
+  if (outcome === "accepted") showToast("App installed!", "success");
+  _deferredInstallPrompt = null;
+  const btn = document.getElementById("btn-install-app");
+  if (btn) btn.classList.add("hidden");
+}
+window.addEventListener("appinstalled", () => {
+  const btn = document.getElementById("btn-install-app");
+  if (btn) btn.classList.add("hidden");
+});
+
 ActionOverlay.init();
 if (Auth.isLoggedIn()) {
   if (Auth.role === "staff") showStaffShell();
