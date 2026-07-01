@@ -2038,4 +2038,4 @@ setInterval(()=>{
   if (!Auth.isLoggedIn()||Auth.role==="staff") return;
   if (currentMainTab==="dashboard")  loadDashboard();
   if (currentMainTab==="attendance") renderAttendanceTable();
-}, 60000);
+}, 60000); 
