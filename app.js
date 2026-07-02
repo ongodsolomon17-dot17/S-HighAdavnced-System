@@ -1406,31 +1406,45 @@ async function removeStaff(id) {
 
 // ===== Attendance ===========================================================
 async function recordAttendance(type, staffId, lat, lng, force = false) {
-  const label = type === "check_in" ? "Checking in…" : "Checking out…";
   const body = { staff_id: staffId, action: type };
   if (lat != null) body.lat = lat;
   if (lng != null) body.lng = lng;
   if (force)       body.force = true;
 
+  // Make the API call first — without the overlay — so we can inspect
+  // the response before deciding whether to show success or the geo warning.
   let res;
-  await ActionOverlay.run(label, async () => {
+  try {
     res = await apiFetch("/attendance", { method: "POST", body: JSON.stringify(body) });
-  });
+  } catch (err) {
+    // Hard error (403 geofence block for staff, 409 duplicate, etc.)
+    showToast(err.message || "Failed to record attendance.", "error");
+    return;
+  }
 
-  // Server returns a soft warning instead of a hard block when admin's
-  // staff member is outside the geofence — show the confirm popup.
+  // Server returns HTTP 200 with location_warning when admin's staff is
+  // outside the geofence — show the popup before doing anything else.
   if (res && res.location_warning) {
-    return new Promise((resolve) => {
-      const msg = res.message || "Staff location does not match the set location.";
-      document.getElementById("geo-warn-msg").textContent = msg;
-      document.getElementById("geo-warn-lat").textContent  = lat != null ? `${(+lat).toFixed(6)}, ${(+lng).toFixed(6)}` : "Not available";
-      document.getElementById("geo-warn-modal").classList.remove("hidden");
-      document.getElementById("modal-overlay").classList.remove("hidden");
+    const msg = res.message || "Staff location does not match the set location.";
+    document.getElementById("geo-warn-msg").textContent = msg;
+    document.getElementById("geo-warn-lat").textContent = lat != null
+      ? `${(+lat).toFixed(6)}, ${(+lng).toFixed(6)}`
+      : "Not available";
+    openModal("geo-warn-modal");
 
+    return new Promise((resolve) => {
       document.getElementById("geo-warn-proceed").onclick = async () => {
         closeModal();
+        // Retry with force=true — shows the action overlay this time since
+        // we know we're going through with recording.
+        const label = type === "check_in" ? "Checking in…" : "Checking out…";
         try {
-          await recordAttendance(type, staffId, lat, lng, true);
+          await ActionOverlay.run(label, async () => {
+            await apiFetch("/attendance", { method: "POST", body: JSON.stringify({ ...body, force: true }) });
+          });
+          showToast(`${staffId} ${type === "check_in" ? "checked in" : "checked out"} ✅`, "success");
+          refreshDisplay();
+          pushToIntegration({ staff_id: staffId, action: type, timestamp: new Date().toISOString(), lat, lng });
         } catch (err) {
           showToast(err.message || "Failed to record attendance.", "error");
         }
@@ -1444,6 +1458,12 @@ async function recordAttendance(type, staffId, lat, lng, force = false) {
     });
   }
 
+  // Normal success path — show the action overlay retrospectively as a
+  // brief confirmation animation, then toast and refresh.
+  const label = type === "check_in" ? "Checking in…" : "Checking out…";
+  await ActionOverlay.run(label, async () => {
+    // Already succeeded — just animate the overlay then resolve immediately
+  });
   showToast(`${staffId} ${type === "check_in" ? "checked in" : "checked out"} ✅`, "success");
   refreshDisplay();
   pushToIntegration({ staff_id: staffId, action: type, timestamp: new Date().toISOString(), lat, lng });
@@ -2038,4 +2058,4 @@ setInterval(()=>{
   if (!Auth.isLoggedIn()||Auth.role==="staff") return;
   if (currentMainTab==="dashboard")  loadDashboard();
   if (currentMainTab==="attendance") renderAttendanceTable();
-}, 60000); 
+}, 60000);
