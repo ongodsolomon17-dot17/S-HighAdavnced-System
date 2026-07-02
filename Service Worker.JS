@@ -1,4 +1,4 @@
-// Minimal service worker — required by browser's for "Add to Home Screen " /
+// Minimal service worker — required by browser's for "Add to Home Screen" /
 // install prompts to appear. Caches static assets only (HTML/CSS/JS/icons),
 // never API responses, so attendance data is always fetched live and never
 // served stale from cache.
