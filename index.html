@@ -688,6 +688,14 @@
               </label>
               <span style="font-size:13px;font-weight:600">Enable Day Shift Clock-Out</span>
             </label>
+            <label style="grid-column:1/-1;display:flex;align-items:center;gap:10px">
+              <label class="toggle-switch">
+                <input type="checkbox" id="auto-clockout-enabled" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="font-size:13px;font-weight:600">Auto Clock-Out at Day Shift End</span>
+            </label>
+            <p class="hint" style="grid-column:1/-1;margin:0">When enabled, staff who are still clocked in at the day checkout time will be automatically clocked out by the system.</p>
           </div>
           <div style="margin-top:16px">
             <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
@@ -695,7 +703,7 @@
                 <input type="checkbox" id="enable-night-shift" onchange="toggleNightShift()" />
                 <span class="toggle-slider"></span>
               </label>
-              <span style="font-size:13px;font-weight:600">🌙 Enable Night Shift</span>
+              <span style="font-size:13px;font-weight:600">Enable Night Shift</span>
             </label>
             <div id="night-shift-fields" class="hidden">
               <div class="form-grid">
@@ -708,6 +716,14 @@
                   </label>
                   <span style="font-size:13px;font-weight:600">Enable Night Shift Clock-Out</span>
                 </label>
+                <label style="grid-column:1/-1;display:flex;align-items:center;gap:10px">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="night-auto-clockout-enabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span style="font-size:13px;font-weight:600">Auto Clock-Out at Night Shift End</span>
+                </label>
+                <p class="hint" style="grid-column:1/-1;margin:0">When enabled, staff still clocked in at night checkout time are automatically clocked out by the system.</p>
               </div>
             </div>
           </div>
@@ -796,7 +812,7 @@
       </div>
     </section>
   </main>
-  <footer class="app-footer"><p>Your data is encrypted and stored securely. &middot; <a href="/Privacy.HTML" target="_blank" style="color:var(--accent)">Privacy Policy</a></p></footer>
+  <footer class="app-footer"><p>Your data is encrypted and stored securely. &middot; <a href="#" onclick="event.preventDefault();openModal('privacy-modal')" style="color:var(--accent)">Privacy Policy</a></p></footer>
 </div>
 
 
@@ -890,6 +906,43 @@
   <div class="modal-actions">
     <button class="primary"   onclick="trustThisDevice()">Trust This Device</button>
     <button class="secondary" onclick="closeModal()">Not Now</button>
+  </div>
+</div>
+
+<!-- ══════ PRIVACY POLICY MODAL ══════ -->
+<div id="privacy-modal" class="modal modal-wide hidden" style="max-height:85vh;overflow-y:auto">
+  <div class="modal-header" style="position:sticky;top:0;background:var(--glass);backdrop-filter:blur(10px);z-index:1">
+    <h3>Privacy Policy</h3>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <div style="padding:8px 4px;font-size:13px;line-height:1.7;color:var(--text-muted)">
+    <p style="margin-bottom:16px">Last updated: <strong style="color:var(--text)">July 2026</strong> &nbsp;·&nbsp; S Advanced Attendance System</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">1. What We Collect</h4>
+    <p>Company name, email, phone, encrypted password and PIN, optional profile picture, attendance timestamps, GPS coordinates at check-in/out (only when location permission is granted), and device fingerprints for trusted-device verification.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">2. How We Use It</h4>
+    <p>To manage accounts, record attendance, verify identity, send password reset codes (email/SMS/WhatsApp), prevent unauthorised access, and generate attendance reports for company admins.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">3. Who Can See Your Data</h4>
+    <p><strong style="color:var(--text)">Admins</strong> see their own company's staff attendance and contact details only. <strong style="color:var(--text)">Staff</strong> see only their own records. We (the developers) access data only to maintain or secure the service.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">4. Third-Party Services</h4>
+    <p>Supabase (database), Render (backend hosting), Vercel (frontend hosting), Brevo (email), Vonage (SMS/WhatsApp). We do not sell or share data for advertising.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">5. Location Data</h4>
+    <p>GPS is only captured at the moment of a check-in or check-out — never tracked continuously. You can deny location permission, but geofencing-enabled check-ins may not work without it.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">6. Security</h4>
+    <p>Passwords and PINs are hashed before storage. All traffic uses HTTPS. Failed logins are rate-limited. New devices require admin approval before access is granted.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">7. Your Rights</h4>
+    <p>You may request a copy, correction, or deletion of your data. Staff should contact their company admin. Admins may contact us at the email below.</p>
+
+    <h4 style="color:var(--accent);margin:18px 0 6px">8. Contact</h4>
+    <p>Questions? Contact: <strong style="color:var(--text)">ongodsolomon17@gmail.com</strong></p>
+
+    <p style="margin-top:20px;font-size:11px;color:var(--text-muted);opacity:0.7">This policy is a reasonable operational summary. For full GDPR/NDPR compliance, consult a legal professional.</p>
   </div>
 </div>
 

@@ -10,6 +10,7 @@ import hmac
 import base64
 import json
 import time
+import threading
 import math
 import random
 import string
@@ -697,8 +698,10 @@ def init_db():
         ("users", "checkin_time",        "TEXT DEFAULT '09:00'"),
         ("users", "night_checkin_time",   "TEXT"),
         ("users", "night_checkout_time",  "TEXT"),
-        ("users", "clockout_enabled",       "BOOLEAN DEFAULT TRUE"),
-        ("users", "night_clockout_enabled", "BOOLEAN DEFAULT TRUE"),
+        ("users", "clockout_enabled",             "BOOLEAN DEFAULT TRUE"),
+        ("users", "night_clockout_enabled",        "BOOLEAN DEFAULT TRUE"),
+        ("users", "auto_clockout_enabled",         "BOOLEAN DEFAULT FALSE"),
+        ("users", "night_auto_clockout_enabled",   "BOOLEAN DEFAULT FALSE"),
         ("users", "sound_enabled",          "BOOLEAN DEFAULT TRUE"),
         ("users", "max_devices",            "INTEGER DEFAULT 3"),
         ("users", "checkout_time",   "TEXT DEFAULT '17:00'"),
@@ -1049,7 +1052,9 @@ def get_profile():
     c.execute("""SELECT id, company, email, phone, created_at,
                         geofence_lat, geofence_lng, geofence_radius, geofence_enabled,
                         checkin_time, checkout_time, night_checkin_time, night_checkout_time,
-                        clockout_enabled, night_clockout_enabled, sound_enabled, max_devices
+                        clockout_enabled, night_clockout_enabled,
+                        auto_clockout_enabled, night_auto_clockout_enabled,
+                        sound_enabled, max_devices
                  FROM users WHERE id=%s""", (current["sub"],))
     user = c.fetchone()
     conn.close()
@@ -1334,23 +1339,31 @@ def set_schedule():
         abort(400, description="Times must be in HH:MM format.")
     conn = get_db()
     c    = conn.cursor()
-    night_checkin           = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
-    night_checkout          = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
-    clockout_enabled        = bool(data.get("clockout_enabled", True))
-    night_clockout_enabled  = bool(data.get("night_clockout_enabled", True))
-    sound_enabled           = bool(data.get("sound_enabled", True))
-    max_devices             = min(5, max(1, int(data.get("max_devices", 3))))
+    night_checkin                = sanitize(data.get("night_checkin_time"),  5, "night_checkin_time")
+    night_checkout               = sanitize(data.get("night_checkout_time"), 5, "night_checkout_time")
+    clockout_enabled             = bool(data.get("clockout_enabled",             True))
+    night_clockout_enabled       = bool(data.get("night_clockout_enabled",       True))
+    auto_clockout_enabled        = bool(data.get("auto_clockout_enabled",        False))
+    night_auto_clockout_enabled  = bool(data.get("night_auto_clockout_enabled",  False))
+    sound_enabled                = bool(data.get("sound_enabled",                True))
+    max_devices                  = min(5, max(1, int(data.get("max_devices", 3))))
     c.execute("""UPDATE users SET checkin_time=%s, checkout_time=%s,
                  night_checkin_time=%s, night_checkout_time=%s,
                  clockout_enabled=%s, night_clockout_enabled=%s,
+                 auto_clockout_enabled=%s, night_auto_clockout_enabled=%s,
                  sound_enabled=%s, max_devices=%s WHERE id=%s""",
               (checkin_time, checkout_time, night_checkin, night_checkout,
-               clockout_enabled, night_clockout_enabled, sound_enabled, max_devices, current["sub"]))
+               clockout_enabled, night_clockout_enabled,
+               auto_clockout_enabled, night_auto_clockout_enabled,
+               sound_enabled, max_devices, current["sub"]))
     conn.commit()
     conn.close()
-    return jsonify({"ok": True, "checkin_time": checkin_time, "checkout_time": checkout_time,
+    return jsonify({"ok": True,
+                    "checkin_time": checkin_time, "checkout_time": checkout_time,
                     "night_checkin_time": night_checkin, "night_checkout_time": night_checkout,
                     "clockout_enabled": clockout_enabled, "night_clockout_enabled": night_clockout_enabled,
+                    "auto_clockout_enabled": auto_clockout_enabled,
+                    "night_auto_clockout_enabled": night_auto_clockout_enabled,
                     "sound_enabled": sound_enabled, "max_devices": max_devices})
 
 
@@ -1954,10 +1967,14 @@ def report_attendance():
     c    = conn.cursor()
     staff_filter = request.args.get("staff_id")
     if current.get("role") == "staff":
-        # Staff can only ever pull their own records, regardless of what
-        # staff_id they pass — otherwise any staff account could read
-        # every colleague's attendance + GPS history.
         staff_filter = current.get("staff_id")
+
+    # Fetch schedule so we can compute punctuality grade per record
+    c.execute("SELECT checkin_time, night_checkin_time FROM users WHERE id=%s", (current["sub"],))
+    sched    = c.fetchone()
+    day_ci   = (sched["checkin_time"]       if sched else None) or "09:00"
+    night_ci = (sched["night_checkin_time"] if sched else None)
+
     query = """
         SELECT a.id, a.staff_id, s.name, a.action, a.timestamp, a.lat, a.lng,
                a.shift_type
@@ -1971,9 +1988,25 @@ def report_attendance():
         params.append(staff_filter)
     query += " ORDER BY a.timestamp DESC"
     c.execute(query, params)
-    records = [dict(r) for r in c.fetchall()]
+    raw  = c.fetchall()
     conn.close()
-    return jsonify(records)
+
+    results = []
+    for r in raw:
+        rec = dict(r)
+        if rec.get("action") == "check_in":
+            try:
+                ts       = datetime.fromisoformat(rec["timestamp"])
+                shift    = rec.get("shift_type")
+                ci_time  = night_ci if (shift == "night" and night_ci) else day_ci
+                grade, _ = compute_lateness_grade(ts, ci_time)
+                rec["punctuality_grade"] = grade
+            except Exception:
+                rec["punctuality_grade"] = "Unknown"
+        else:
+            rec["punctuality_grade"] = None
+        results.append(rec)
+    return jsonify(results)
 
 
 # ===== Superadmin ===========================================================
@@ -2551,6 +2584,96 @@ def health():
 @app.route("/ping", methods=["GET"])
 def ping():
     return jsonify({"pong": True})
+
+
+
+# ===== Auto Clock-Out Background Job ========================================
+def _auto_clockout_worker():
+    """
+    Runs every 60 seconds. For each company that has auto_clockout_enabled
+    or night_auto_clockout_enabled turned on, finds staff who are still
+    checked in past their shift's checkout time and inserts a check_out
+    record on their behalf.
+
+    Uses UTC time. Since the admin sets checkout_time in local time but
+    timestamps are stored in UTC, we compare current UTC hour:minute against
+    the stored HH:MM value offset by 0 (UTC+0). If your server and admin
+    are both in UTC+1, the relative comparison is still correct because both
+    sides are shifted by the same amount. For full multi-timezone support,
+    store a tz_offset column — out of scope for now.
+    """
+    print("[AUTO-CLOCKOUT] Worker started.", flush=True)
+    while True:
+        try:
+            _run_auto_clockout()
+        except Exception as e:
+            print(f"[AUTO-CLOCKOUT] Error: {e}", flush=True)
+        time.sleep(60)
+
+
+def _run_auto_clockout():
+    now     = datetime.utcnow()
+    now_str = now.isoformat()
+    # Format current time as HH:MM for comparison
+    now_hhmm = now.strftime("%H:%M")
+
+    conn = get_db()
+    c    = conn.cursor()
+
+    # Load all companies that have at least one auto-clockout enabled
+    c.execute("""
+        SELECT id, checkout_time, night_checkout_time,
+               auto_clockout_enabled, night_auto_clockout_enabled
+        FROM users
+        WHERE auto_clockout_enabled = TRUE OR night_auto_clockout_enabled = TRUE
+    """)
+    companies = c.fetchall()
+
+    for co in companies:
+        user_id = co["id"]
+
+        # --- Day shift auto clock-out ---
+        if co["auto_clockout_enabled"] and co["checkout_time"]:
+            if now_hhmm == co["checkout_time"]:
+                _clockout_still_in(c, user_id, "day", now_str)
+
+        # --- Night shift auto clock-out ---
+        if co["night_auto_clockout_enabled"] and co["night_checkout_time"]:
+            if now_hhmm == co["night_checkout_time"]:
+                _clockout_still_in(c, user_id, "night", now_str)
+
+    conn.commit()
+    conn.close()
+
+
+def _clockout_still_in(c, user_id: int, shift: str, now_str: str):
+    """Insert a system-generated check_out for every staff member who is
+    still checked in (last action = check_in) for this company and shift."""
+    # Find staff whose most recent attendance record is a check_in
+    c.execute("""
+        SELECT DISTINCT ON (a.staff_id) a.staff_id, a.action, a.shift_type
+        FROM attendance a
+        WHERE a.user_id = %s
+        ORDER BY a.staff_id, a.timestamp DESC
+    """, (user_id,))
+    rows = c.fetchall()
+    for row in rows:
+        if row["action"] != "check_in":
+            continue
+        # Only auto-clock out if the shift matches (or record has no shift)
+        rec_shift = row["shift_type"]
+        if rec_shift and rec_shift != shift:
+            continue
+        c.execute("""
+            INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng, shift_type)
+            VALUES (%s, %s, 'check_out', %s, NULL, NULL, %s)
+        """, (user_id, row["staff_id"], now_str, shift))
+        print(f"[AUTO-CLOCKOUT] Clocked out {row['staff_id']} (company {user_id}, {shift} shift)", flush=True)
+
+
+# Start the daemon thread after init_db() has run but before any request
+_clockout_thread = threading.Thread(target=_auto_clockout_worker, daemon=True)
+_clockout_thread.start()
 
 
 if __name__ == "__main__":

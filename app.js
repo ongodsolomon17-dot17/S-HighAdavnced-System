@@ -1260,22 +1260,25 @@ function toggleGeofenceFields() {
   document.getElementById("geo-enabled-label").textContent = enabled ? "Geofencing On ✅" : "Geofencing Off";
 }
 async function saveSchedule() {
-  const checkin_time          = document.getElementById("sched-checkin").value;
-  const checkout_time         = document.getElementById("sched-checkout").value;
-  const clockout_enabled      = document.getElementById("clockout-enabled").checked;
-  const nightEnabled          = document.getElementById("enable-night-shift").checked;
-  const night_checkin         = nightEnabled ? document.getElementById("sched-night-checkin").value  : null;
-  const night_checkout        = nightEnabled ? document.getElementById("sched-night-checkout").value : null;
-  const night_clockout_enabled= nightEnabled ? document.getElementById("night-clockout-enabled").checked : true;
-  const sound_enabled         = document.getElementById("sound-enabled").checked;
-  const max_devices           = parseInt(document.getElementById("max-devices")?.value || 3);
+  const checkin_time               = document.getElementById("sched-checkin").value;
+  const checkout_time              = document.getElementById("sched-checkout").value;
+  const clockout_enabled           = document.getElementById("clockout-enabled").checked;
+  const auto_clockout_enabled      = document.getElementById("auto-clockout-enabled").checked;
+  const nightEnabled               = document.getElementById("enable-night-shift").checked;
+  const night_checkin              = nightEnabled ? document.getElementById("sched-night-checkin").value  : null;
+  const night_checkout             = nightEnabled ? document.getElementById("sched-night-checkout").value : null;
+  const night_clockout_enabled     = nightEnabled ? document.getElementById("night-clockout-enabled").checked       : true;
+  const night_auto_clockout_enabled= nightEnabled ? document.getElementById("night-auto-clockout-enabled").checked  : false;
+  const sound_enabled              = document.getElementById("sound-enabled").checked;
+  const max_devices                = parseInt(document.getElementById("max-devices")?.value || 3);
   try {
     await apiFetch("/settings/schedule", { method: "PUT", body: JSON.stringify({
-      checkin_time, checkout_time, clockout_enabled,
+      checkin_time, checkout_time, clockout_enabled, auto_clockout_enabled,
       night_checkin_time: night_checkin, night_checkout_time: night_checkout,
-      night_clockout_enabled, sound_enabled, max_devices
+      night_clockout_enabled, night_auto_clockout_enabled,
+      sound_enabled, max_devices
     }) });
-    document.getElementById("sched-status").textContent = `✅ Schedule saved: ${checkin_time}–${checkout_time}`;
+    document.getElementById("sched-status").textContent = `Schedule saved: ${checkin_time}–${checkout_time}`;
     showToast("Schedule saved!", "success");
   } catch (err) { showToast(err.message, "error"); }
 }
@@ -1303,8 +1306,10 @@ async function loadSettingsData() {
       document.getElementById("sched-night-checkin").value  = profile.night_checkin_time;
       document.getElementById("sched-night-checkout").value = profile.night_checkout_time;
     }
-    document.getElementById("clockout-enabled").checked       = profile.clockout_enabled      ?? true;
-    document.getElementById("night-clockout-enabled").checked = profile.night_clockout_enabled ?? true;
+    document.getElementById("clockout-enabled").checked            = profile.clockout_enabled           ?? true;
+    document.getElementById("night-clockout-enabled").checked      = profile.night_clockout_enabled      ?? true;
+    document.getElementById("auto-clockout-enabled").checked       = profile.auto_clockout_enabled       ?? false;
+    document.getElementById("night-auto-clockout-enabled").checked = profile.night_auto_clockout_enabled ?? false;
     const soundOn = profile.sound_enabled ?? true;
     document.getElementById("sound-enabled").checked = soundOn;
     document.getElementById("sound-enabled-label").textContent = soundOn ? "Sounds On 🔊" : "Sounds Off";
