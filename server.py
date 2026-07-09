@@ -812,11 +812,23 @@ def init_db():
     # unique index over duplicates fails outright.
     try:
         c.execute("""
-            DELETE FROM trusted_devices a USING trusted_devices b
-            WHERE a.staff_id IS NOT NULL
-              AND a.id < b.id
-              AND a.user_id = b.user_id AND a.role = b.role
-              AND a.staff_id = b.staff_id AND a.device_fingerprint = b.device_fingerprint
+            WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY user_id, role, staff_id, device_fingerprint
+                           ORDER BY
+                               CASE status
+                                   WHEN 'trusted'      THEN 3
+                                   WHEN 'approved_temp' THEN 2
+                                   WHEN 'pending'       THEN 1
+                                   ELSE 0
+                               END DESC,
+                               id DESC
+                       ) AS rn
+                FROM trusted_devices
+                WHERE staff_id IS NOT NULL
+            )
+            DELETE FROM trusted_devices WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
         """)
         conn.commit()
     except Exception as e:
@@ -1693,12 +1705,6 @@ def record_attendance():
 
         # Geofence check
         if settings and settings.get("geofence_enabled") and settings["geofence_lat"] is not None:
-            # TEMPORARY DIAGNOSTIC LOGGING — remove once geofencing is
-            # confirmed working. Check Render's log output after a test
-            # clock-in/scan to see exactly what the server received.
-            print(f"[GEOFENCE-DEBUG] role={current.get('role')} action={action} "
-                  f"office=({settings['geofence_lat']},{settings['geofence_lng']}) "
-                  f"radius={settings['geofence_radius']} received=({lat},{lng})", flush=True)
             if lat is None or lng is None:
                 # BUG FIX: geofencing was silently skipped whenever lat/lng
                 # weren't sent (e.g. location permission denied, or the
@@ -1721,7 +1727,6 @@ def record_attendance():
                     settings["geofence_lat"], settings["geofence_lng"],
                     lat, lng
                 )
-                print(f"[GEOFENCE-DEBUG] computed distance={dist:.1f}m (radius={settings['geofence_radius']}m)", flush=True)
                 if dist > settings["geofence_radius"]:
                     if current.get("role") == "admin":
                         # Admins can override the geofence — but only if they
