@@ -129,6 +129,50 @@ html, body {
 ═══════════════════════════ */
 .auth-blobs { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
 
+/* ═══════════════════════════
+   LOCK SCREEN (Face ID / Fingerprint app unlock)
+═══════════════════════════ */
+#lock-screen {
+  position: fixed; inset: 0; z-index: 9998;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: linear-gradient(160deg, #0b1733 0%, #070e22 100%);
+  padding: 24px;
+}
+.lock-screen-name {
+  font-size: 1.2rem; font-weight: 700; color: var(--text);
+  margin-top: 4px;
+}
+.lock-screen-sub {
+  font-size: 0.85rem; color: var(--text-muted);
+  margin-top: 4px; margin-bottom: 28px;
+}
+.bio-unlock-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 14px 22px; border-radius: 14px;
+  font-size: 0.95rem; font-weight: 700;
+  cursor: pointer;
+}
+.bio-icon { font-size: 1.3rem; line-height: 1; }
+.lock-unlock-btn { width: min(320px, 90vw); }
+#lock-screen-error { margin-top: 16px; }
+
+/* ═══════════════════════════
+   BIOMETRIC SETTINGS
+═══════════════════════════ */
+.bio-settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 0;
+}
+.bio-settings-row:not(:last-child) { border-bottom: 1px solid var(--glass-border); }
+.bio-settings-copy .bio-settings-title { font-weight: 600; color: var(--text); font-size: 0.92rem; }
+.bio-settings-copy .bio-settings-desc  { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+.bio-unsupported-note {
+  font-size: 0.8rem; color: var(--text-muted);
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 10px; padding: 10px 12px; margin-top: 10px;
+}
+
 .blob {
   position: absolute; border-radius: 50%;
   filter: blur(90px); opacity: 0.18;

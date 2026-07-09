@@ -3,24 +3,150 @@
 const API_URL = "https://s-highadavnced-system.onrender.com";
 
 // ===== Auth Store ===========================================================
+// Identity fields live in localStorage (not sessionStorage) so that once
+// signed in, the session survives fully closing and reopening the installed
+// app — the same "stay signed in" behaviour as a native app. Session-only
+// caches (geofence/schedule/branding) stay in sessionStorage and are always
+// refetched from the API on shell load, so they can't ever go stale.
 const Auth = {
-  get token()    { return sessionStorage.getItem("att_token"); },
-  get company()  { return sessionStorage.getItem("att_company"); },
-  get role()     { return sessionStorage.getItem("att_role"); },
-  get staffId()  { return sessionStorage.getItem("att_staff_id"); },
-  get staffName(){ return sessionStorage.getItem("att_staff_name"); },
+  get token()    { return localStorage.getItem("att_token"); },
+  get company()  { return localStorage.getItem("att_company"); },
+  get role()     { return localStorage.getItem("att_role"); },
+  get staffId()  { return localStorage.getItem("att_staff_id"); },
+  get staffName(){ return localStorage.getItem("att_staff_name"); },
   set(token, company, role, staffId, staffName) {
-    sessionStorage.setItem("att_token",      token);
-    sessionStorage.setItem("att_company",    company);
-    sessionStorage.setItem("att_role",       role || "admin");
-    sessionStorage.setItem("att_staff_id",   staffId   || "");
-    sessionStorage.setItem("att_staff_name", staffName || "");
+    localStorage.setItem("att_token",      token);
+    localStorage.setItem("att_company",    company);
+    localStorage.setItem("att_role",       role || "admin");
+    localStorage.setItem("att_staff_id",   staffId   || "");
+    localStorage.setItem("att_staff_name", staffName || "");
   },
   clear() {
-    ["att_token","att_company","att_role","att_staff_id","att_staff_name",
-     "att_geofence","att_schedule","att_branding"].forEach(k => sessionStorage.removeItem(k));
+    ["att_token","att_company","att_role","att_staff_id","att_staff_name"]
+      .forEach(k => localStorage.removeItem(k));
+    ["att_geofence","att_schedule","att_branding"].forEach(k => sessionStorage.removeItem(k));
+    Biometric.forgetDevice();
   },
   isLoggedIn() { return !!this.token; }
+};
+
+// ===== Biometric Unlock (Face ID / Fingerprint) =============================
+// Two independent, opt-in features, each backed by its own on-device
+// WebAuthn platform-authenticator credential (Face ID / Fingerprint / Windows
+// Hello — whatever the device's OS exposes). Both are purely per-device:
+// signing out, or using a different device, always falls back to normal
+// sign-in / PIN entry.
+//
+//  1. "App unlock"  — after a normal sign-in, the session token is kept in
+//     localStorage so the installed app stays signed in like a native app.
+//     If app-unlock is enabled, reopening the app shows a lock screen that
+//     must be cleared with Face ID / Fingerprint before the dashboard shows.
+//     This never talks to the server — it's a local gate in front of a
+//     session that's already valid.
+//
+//  2. "PIN replacement" (admin only) — lets the admin clear the PIN modal
+//     with Face ID / Fingerprint instead of typing 4 digits. Because some
+//     PIN-gated actions (change password/PIN) re-send the PIN to the server
+//     for defense-in-depth, this path DOES call the server
+///    (/auth/verify-pin-biometric), which only succeeds if the admin
+//     already turned the feature on AND this exact device is already a
+//     trusted device on their account.
+const Biometric = {
+  async platformAvailable() {
+    if (!window.PublicKeyCredential || !navigator.credentials) return false;
+    try { return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }
+    catch (_) { return false; }
+  },
+
+  _b64urlEncode(buf) {
+    return btoa(String.fromCharCode(...new Uint8Array(buf)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  },
+  _b64urlDecode(str) {
+    const pad = str.length % 4 ? "=".repeat(4 - (str.length % 4)) : "";
+    const bin = atob(str.replace(/-/g, "+").replace(/_/g, "/") + pad);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  },
+
+  async _createCredential(label) {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId    = crypto.getRandomValues(new Uint8Array(16));
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp:   { name: "S Advanced Attendance", id: location.hostname },
+        user: { id: userId, name: label, displayName: label },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+        timeout: 60000,
+      }
+    });
+    if (!cred) throw new Error("Could not create biometric credential.");
+    return this._b64urlEncode(cred.rawId);
+  },
+
+  async _assert(credIdB64) {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        allowCredentials: [{ id: this._b64urlDecode(credIdB64), type: "public-key" }],
+        userVerification: "required",
+        timeout: 60000,
+      }
+    });
+    if (!assertion) throw new Error("Biometric verification failed.");
+    return true;
+  },
+
+  // ---- App unlock (dashboard lock screen) --------------------------------
+  isAppUnlockEnabled() { return localStorage.getItem("bio_unlock_enabled") === "1"; },
+
+  async enableAppUnlock(label) {
+    const credId = await this._createCredential(label || "S Attendance user");
+    localStorage.setItem("bio_unlock_cred",    credId);
+    localStorage.setItem("bio_unlock_enabled", "1");
+  },
+  disableAppUnlock() {
+    localStorage.removeItem("bio_unlock_cred");
+    localStorage.removeItem("bio_unlock_enabled");
+  },
+  async verifyAppUnlock() {
+    const credId = localStorage.getItem("bio_unlock_cred");
+    if (!credId) throw new Error("Biometric unlock isn't set up on this device.");
+    return this._assert(credId);
+  },
+
+  // ---- PIN replacement (admin only) ---------------------------------------
+  isPinUnlockEnabled() { return localStorage.getItem("bio_pin_enabled") === "1"; },
+
+  async enablePinUnlock(label) {
+    const credId = await this._createCredential(label || "S Admin PIN");
+    localStorage.setItem("bio_pin_cred",    credId);
+    localStorage.setItem("bio_pin_enabled", "1");
+  },
+  disablePinUnlock() {
+    localStorage.removeItem("bio_pin_cred");
+    localStorage.removeItem("bio_pin_enabled");
+  },
+  // Verifies locally, then asks the server to mint a pin_proof (server
+  // enforces that this feature is actually enabled + this device is trusted).
+  async verifyPinUnlock() {
+    const credId = localStorage.getItem("bio_pin_cred");
+    if (!credId) throw new Error("Biometric PIN unlock isn't set up on this device.");
+    await this._assert(credId);
+    return apiFetch("/auth/verify-pin-biometric", {
+      method: "POST",
+      headers: { "X-Device-FP": getDeviceFingerprint() }
+    });
+  },
+
+  forgetDevice() {
+    this.disableAppUnlock();
+    this.disablePinUnlock();
+  }
 };
 
 // ===== Splash Screen ========================================================
@@ -32,11 +158,15 @@ function hideSplash() {
 
       // After splash, decide what to show
       if (Auth.isLoggedIn()) {
-        apiFetch("/auth/profile").catch(() => {
-          Auth.clear();
-          showAuthShell();
-          showToast("Session expired, please sign in again.", "error");
-        });
+        if (Biometric.isAppUnlockEnabled()) {
+          showLockScreen();
+        } else {
+          apiFetch("/auth/profile").catch(() => {
+            Auth.clear();
+            showAuthShell();
+            showToast("Session expired, please sign in again.", "error");
+          });
+        }
       } else {
         showAuthShell();
       }
@@ -44,6 +174,57 @@ function hideSplash() {
   }
 }
 hideSplash();
+
+// ===== Lock Screen (Face ID / Fingerprint app unlock) =======================
+// Shown instead of the dashboard when a persisted session exists on this
+// device and the person has opted into biometric app unlock. Never contacts
+// the server itself — it's just gating access to a session token that's
+// already sitting in localStorage from a previous real sign-in.
+function showLockScreen() {
+  document.getElementById("auth-shell").classList.add("hidden");
+  document.getElementById("app-shell").classList.add("hidden");
+  document.getElementById("staff-shell").classList.add("hidden");
+  const name = Auth.role === "staff" ? (Auth.staffName || Auth.staffId || "Staff") : (Auth.company || "Admin");
+  document.getElementById("lock-screen-name").textContent = `Welcome back, ${name}`;
+  document.getElementById("lock-screen-error").classList.add("hidden");
+  document.getElementById("lock-screen").classList.remove("hidden");
+  attemptAppUnlock();
+}
+
+async function attemptAppUnlock() {
+  const btn = document.getElementById("lock-unlock-btn");
+  const err = document.getElementById("lock-screen-error");
+  err.classList.add("hidden");
+  if (btn) btn.disabled = true;
+  try {
+    await Biometric.verifyAppUnlock();
+    // Locally verified — now confirm the session itself is still valid.
+    await apiFetch("/auth/profile");
+    document.getElementById("lock-screen").classList.add("hidden");
+    if (Auth.role === "staff") showStaffShell(); else showAppShell();
+  } catch (e) {
+    err.textContent = e.message === "Session expired." || e.message === "Not logged in"
+      ? "Your session expired. Please sign in again."
+      : "Face ID / Fingerprint didn't match. Try again.";
+    err.classList.remove("hidden");
+    if (e.message === "Session expired." || e.message === "Not logged in") {
+      Auth.clear();
+      document.getElementById("lock-screen").classList.add("hidden");
+      showAuthShell();
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function useLockScreenPassword() {
+  // "Not you? Sign in with password instead" — falls all the way back to a
+  // normal sign-in, without disturbing the persisted session of whoever is
+  // actually still enrolled (only an explicit Sign Out clears that).
+  document.getElementById("lock-screen").classList.add("hidden");
+  Auth.clear();
+  showAuthShell();
+}
 
 // ===== Action Overlay =======================================================
 // Shows a splash-style processing screen during key commands (check-in/out,
@@ -422,6 +603,7 @@ function showAuthShell() {
   document.getElementById("auth-shell").classList.remove("hidden");
   document.getElementById("app-shell").classList.add("hidden");
   document.getElementById("staff-shell").classList.add("hidden");
+  document.getElementById("lock-screen").classList.add("hidden");
   const saved = sessionStorage.getItem("att_branding");
   if (saved) applyBranding(saved);
 }
@@ -430,6 +612,7 @@ function showAppShell() {
   document.getElementById("auth-shell").classList.add("hidden");
   document.getElementById("app-shell").classList.remove("hidden");
   document.getElementById("staff-shell").classList.add("hidden");
+  document.getElementById("lock-screen").classList.add("hidden");
   document.getElementById("company-name-display").textContent = Auth.company || "Your Company";
   loadBranding();
   refreshDisplay();
@@ -443,6 +626,7 @@ async function showStaffShell() {
   document.getElementById("auth-shell").classList.add("hidden");
   document.getElementById("app-shell").classList.add("hidden");
   document.getElementById("staff-shell").classList.remove("hidden");
+  document.getElementById("lock-screen").classList.add("hidden");
   document.getElementById("staff-company-display").textContent = Auth.company || "Company";
   document.getElementById("staff-name-display").textContent = Auth.staffName || Auth.staffId || "Staff";
   loadBranding();
@@ -450,6 +634,7 @@ async function showStaffShell() {
   loadStaffSummary("daily");
   startStaffGeoWatch();
   loadStaffNotices();
+  initBiometricSettingsUI();
 
   // Fetch fresh schedule so shift selector and clock-out visibility
   // are correct even on page refresh (sessionStorage is cleared on logout)
@@ -670,11 +855,36 @@ async function staffSelfRecord(action) {
   const staffId = Auth.staffId;
   if (!staffId) { showToast("No staff ID linked.", "error"); return; }
 
+  const geofence = JSON.parse(sessionStorage.getItem("att_geofence") || "{}");
+
   let lat = null, lng = null;
   if (staffGeoPos) { lat = staffGeoPos.coords.latitude; lng = staffGeoPos.coords.longitude; }
 
-  const geofence = JSON.parse(sessionStorage.getItem("att_geofence") || "{}");
-  if (geofence.enabled && geofence.lat && lat) {
+  // Geofencing is on but the background watch hasn't produced a fix yet —
+  // actively request one now rather than silently sending no location
+  // (the server correctly rejects that when geofencing is enabled).
+  if (geofence.enabled && lat == null) {
+    if (!navigator.geolocation) {
+      showToast("Location services aren't available on this device — can't verify geofence.", "error");
+      return;
+    }
+    const btn0 = document.getElementById(action === "check_in" ? "btn-staff-checkin" : "btn-staff-checkout");
+    if (btn0) btn0.disabled = true;
+    try {
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
+      );
+      staffGeoPos = pos;
+      lat = pos.coords.latitude; lng = pos.coords.longitude;
+    } catch (_) {
+      showToast("Couldn't get your location. Please enable location permissions and try again.", "error");
+      if (btn0) btn0.disabled = false;
+      return;
+    }
+    if (btn0) btn0.disabled = false;
+  }
+
+  if (geofence.enabled && geofence.lat && lat != null) {
     const dist = haversineM(geofence.lat, geofence.lng, lat, lng);
     if (dist > geofence.radius) {
       showToast(`Unable to ${action === "check_in" ? "clock in" : "clock out"} — location mismatch (${Math.round(dist)}m away).`, "error");
@@ -734,9 +944,10 @@ async function handleRegister() {
   try {
     const res = await apiFetch("/auth/register", { method: "POST", body: JSON.stringify({ company, email, phone, password, pin }) }, false);
     Auth.set(res.token, res.company, "admin");
-    await checkDeviceTrust();
-    showAppShell();
-    showToast(`Welcome, ${res.company}!`, "success");
+    if (await checkDeviceTrust()) {
+      showAppShell();
+      showToast(`Welcome, ${res.company}!`, "success");
+    }
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -759,9 +970,11 @@ async function handleLogin() {
     const resData = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(resData.error || `Login failed (${res.status})`);
     Auth.set(resData.token, resData.company, "admin");
-    await checkDeviceTrust();
-    showAppShell();
-    showToast(`Welcome back, ${resData.company}!`, "success");
+    if (await checkDeviceTrust()) {
+      showAppShell();
+      showToast(`Welcome back, ${resData.company}!`, "success");
+      maybeOfferBiometricEnroll();
+    }
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -786,9 +999,11 @@ async function handleStaffLogin() {
     Auth.set(resData2.token, resData2.company, "staff", resData2.staff_id, resData2.name);
     if (resData2.geofence) sessionStorage.setItem("att_geofence", JSON.stringify(resData2.geofence));
     if (resData2.schedule) sessionStorage.setItem("att_schedule", JSON.stringify(resData2.schedule));
-    await checkDeviceTrust();
-    showStaffShell();
-    showToast(`Welcome, ${resData2.name}!`, "success");
+    if (await checkDeviceTrust()) {
+      showStaffShell();
+      showToast(`Welcome, ${resData2.name}!`, "success");
+      maybeOfferBiometricEnroll();
+    }
   } catch (err) { showAuthMessage(err.message); SoundEngine.fail(0); }
   finally { btn.disabled = false; sp.classList.add("hidden"); }
 }
@@ -820,19 +1035,27 @@ async function checkDeviceTrust() {
     const res  = await apiFetch("/devices/verify", { method: "POST", body: JSON.stringify({ fingerprint: fp, device_name: name }) });
     if (res.status === "trusted") {
       if (res.temp && res.expires_at) showToast(`⚠️ Temp access expires ${new Date(res.expires_at+"Z").toLocaleString()}`, "error");
-      return;
+      return true;
     }
     if (res.status === "pending") {
       Auth.clear(); showAuthShell();
-      showAuthMessage(res.reason ? `⏳ ${res.reason}` : "⏳ Device approval pending. Ask your admin to approve.", "error"); return;
+      showAuthMessage(res.reason ? `⏳ ${res.reason}` : "⏳ Device approval pending. Ask your admin to approve.", "error");
+      return false;
     }
     if (res.status === "rejected") {
       Auth.clear(); showAuthShell();
-      showAuthMessage(res.reason ? `🚫 ${res.reason}` : "🚫 Access denied. Device rejected by admin.", "error"); return;
+      showAuthMessage(res.reason ? `🚫 ${res.reason}` : "🚫 Access denied. Device rejected by admin.", "error");
+      return false;
     }
-    if (res.status === "unknown" && Auth.role === "admin") { _pendingDeviceTrust = true; openModal("device-modal"); return; }
+    if (res.status === "unknown" && Auth.role === "admin") { _pendingDeviceTrust = true; openModal("device-modal"); return true; }
     if (res.first_bind) showToast("✅ Device registered as your primary device.", "success");
-  } catch (_) {}
+    return true;
+  } catch (_) {
+    // A network hiccup on this check shouldn't lock a legitimately signed-in
+    // person out — fail open here (the actual data endpoints are still
+    // protected by the JWT regardless of device-trust status).
+    return true;
+  }
 }
 
 async function trustThisDevice() {
@@ -909,15 +1132,46 @@ async function rejectDevice(id) {
 
 // ===== PIN Modal ============================================================
 let pinResolve = null, pinReject = null;
-function requestPin() {
+async function requestPin() {
+  document.querySelectorAll(".pin-box").forEach(b => b.value = "");
+  document.getElementById("pin-error").classList.add("hidden");
+  const bioBtn  = document.getElementById("btn-pin-biometric");
+  const pinArea = document.getElementById("pin-inputs");
+  const useBio  = Auth.role !== "staff" && Biometric.isPinUnlockEnabled() && await Biometric.platformAvailable();
+  bioBtn.classList.toggle("hidden", !useBio);
+  pinArea.classList.toggle("hidden", useBio);
+  document.getElementById("pin-fallback-link").classList.toggle("hidden", !useBio);
+  document.getElementById("btn-confirm-pin").classList.toggle("hidden", useBio);
   return new Promise((resolve, reject) => {
     pinResolve = resolve; pinReject = reject;
-    document.querySelectorAll(".pin-box").forEach(b => b.value = "");
-    document.getElementById("pin-error").classList.add("hidden");
     openModal("pin-modal");
-    document.querySelector(".pin-box").focus();
+    if (useBio) confirmPinBiometric();
+    else document.querySelector(".pin-box").focus();
   });
 }
+
+function showPinTypeFallback() {
+  document.getElementById("btn-pin-biometric").classList.add("hidden");
+  document.getElementById("pin-fallback-link").classList.add("hidden");
+  document.getElementById("pin-inputs").classList.remove("hidden");
+  document.getElementById("btn-confirm-pin").classList.remove("hidden");
+  document.querySelector(".pin-box").focus();
+}
+
+async function confirmPinBiometric() {
+  document.getElementById("pin-error").classList.add("hidden");
+  try {
+    const data = await Biometric.verifyPinUnlock();
+    closeModal();
+    if (pinResolve) pinResolve({ pin: null, pin_proof: data.pin_proof });
+  } catch (err) {
+    document.getElementById("pin-error").textContent = "Face ID / Fingerprint didn't work. Enter your PIN instead.";
+    document.getElementById("pin-error").classList.remove("hidden");
+    showPinTypeFallback();
+  }
+}
+document.getElementById("btn-pin-biometric").addEventListener("click", confirmPinBiometric);
+document.getElementById("pin-fallback-link").addEventListener("click", showPinTypeFallback);
 
 document.getElementById("pin-inputs").addEventListener("input", e => {
   if (!e.target.classList.contains("pin-box")) return;
@@ -944,9 +1198,10 @@ async function confirmPin() {
   const btn = document.getElementById("btn-confirm-pin");
   btn.disabled = true;
   try {
-    await apiFetch("/auth/verify-pin", { method: "POST", body: JSON.stringify({ pin }) });
-    closeModal(); if (pinResolve) pinResolve(pin);
+    const data = await apiFetch("/auth/verify-pin", { method: "POST", body: JSON.stringify({ pin }) });
+    closeModal(); if (pinResolve) pinResolve({ pin, pin_proof: data.pin_proof });
   } catch (_) {
+    document.getElementById("pin-error").textContent = "Incorrect PIN. Try again.";
     document.getElementById("pin-error").classList.remove("hidden");
     document.querySelectorAll(".pin-box").forEach(b => b.value = "");
     document.querySelector(".pin-box").focus();
@@ -958,8 +1213,13 @@ document.getElementById("btn-close-pin").addEventListener("click",  () => { clos
 document.getElementById("btn-close-pin2").addEventListener("click", () => { closeModal(); if (pinReject) pinReject(new Error("PIN cancelled")); });
 
 async function withPin(action) {
-  try { const pin = await requestPin(); await action(pin); }
+  try { const pinResult = await requestPin(); await action(pinResult); }
   catch (err) { if (err.message !== "PIN cancelled") showToast(err.message, "error"); }
+}
+// Builds the right request-body fragment from a PIN modal result, whether
+// it came from a typed PIN or a biometric pin_proof.
+function pinAuthBody(pinResult) {
+  return pinResult.pin_proof ? { pin_proof: pinResult.pin_proof } : { pin: pinResult.pin };
 }
 
 // ===== Forgot Password ======================================================
@@ -1197,10 +1457,11 @@ async function removeProfilePic() {
 }
 
 // ===== Profile Edit =========================================================
-let _profileEditPin = null;
+let _profileEditAuth = null; // { pin, pin_proof } from the PIN modal (typed or biometric)
+function _pinAuthBody() { return pinAuthBody(_profileEditAuth); }
 async function unlockProfileEdit() {
-  await withPin(async (pin) => {
-    _profileEditPin = pin;
+  await withPin(async (pinResult) => {
+    _profileEditAuth = pinResult;
     const profile = await apiFetch("/auth/profile");
     document.getElementById("edit-company").value = profile.company || "";
     document.getElementById("edit-email").value   = profile.email   || "";
@@ -1210,7 +1471,7 @@ async function unlockProfileEdit() {
   });
 }
 function lockProfileEdit() {
-  _profileEditPin = null;
+  _profileEditAuth = null;
   document.getElementById("profile-edit-form").classList.add("hidden");
   document.getElementById("profile-edit-locked").classList.remove("hidden");
 }
@@ -1218,10 +1479,10 @@ async function saveProfileEdit() {
   const company = document.getElementById("edit-company").value.trim();
   const email   = document.getElementById("edit-email").value.trim();
   const phone   = document.getElementById("edit-phone").value.trim();
-  if (!_profileEditPin) { showToast("Session expired — please unlock again.", "error"); lockProfileEdit(); return; }
+  if (!_profileEditAuth) { showToast("Session expired — please unlock again.", "error"); lockProfileEdit(); return; }
   try {
-    await apiFetch("/auth/update-profile", { method: "PUT", body: JSON.stringify({ company, email, phone, pin: _profileEditPin }) });
-    if (company) { sessionStorage.setItem("att_company", company); document.getElementById("company-name-display").textContent = company; }
+    await apiFetch("/auth/update-profile", { method: "PUT", body: JSON.stringify({ company, email, phone, ..._pinAuthBody() }) });
+    if (company) { localStorage.setItem("att_company", company); document.getElementById("company-name-display").textContent = company; }
     document.getElementById("profile-edit-status").textContent = "✅ Profile updated!";
     showToast("Profile updated!", "success");
   } catch (err) { showToast(err.message, "error"); }
@@ -1229,16 +1490,16 @@ async function saveProfileEdit() {
 async function savePasswordPin() {
   const newPassword = document.getElementById("edit-new-password").value;
   const newPin      = document.getElementById("edit-new-pin").value.trim();
-  if (!_profileEditPin) { showToast("Session expired — please unlock again.", "error"); lockProfileEdit(); return; }
+  if (!_profileEditAuth) { showToast("Session expired — please unlock again.", "error"); lockProfileEdit(); return; }
   if (newPassword) {
     if (newPassword.length < 8) { showToast("Password must be at least 8 characters.", "error"); return; }
-    try { await apiFetch("/auth/change-password", { method: "PUT", body: JSON.stringify({ new_password: newPassword, pin: _profileEditPin }) }); document.getElementById("edit-new-password").value = ""; showToast("Password updated!", "success"); }
+    try { await apiFetch("/auth/change-password", { method: "PUT", body: JSON.stringify({ new_password: newPassword, ..._pinAuthBody() }) }); document.getElementById("edit-new-password").value = ""; showToast("Password updated!", "success"); }
     catch (err) { showToast(err.message, "error"); return; }
   }
   if (newPin) {
     if (!/^\d{4}$/.test(newPin)) { showToast("PIN must be exactly 4 digits.", "error"); return; }
     try {
-      await apiFetch("/auth/change-pin", { method: "PUT", body: JSON.stringify({ new_pin: newPin, pin: _profileEditPin }) });
+      await apiFetch("/auth/change-pin", { method: "PUT", body: JSON.stringify({ new_pin: newPin, ..._pinAuthBody() }) });
       document.getElementById("edit-new-pin").value = "";
       showToast("PIN updated!", "success");
       // The PIN just changed — the previously-verified PIN is now stale.
@@ -1327,6 +1588,14 @@ async function loadSettingsData() {
 
     document.getElementById("max-devices").value = profile.max_devices || 3;
     if (profile.profile_picture) applyBranding(profile.profile_picture);
+
+    // Server is the source of truth for whether biometric-PIN-replace is
+    // allowed at all; if it was turned off (e.g. from another device),
+    // make sure this device's local credential doesn't linger unused.
+    if (!profile.pin_biometric_enabled && Biometric.isPinUnlockEnabled()) {
+      Biometric.disablePinUnlock();
+    }
+    initBiometricSettingsUI();
   } catch (_) {}
   try {
     const intg = await apiFetch("/integrations");
@@ -1339,6 +1608,89 @@ async function loadSettingsData() {
   } catch (_) {}
   loadDevices(); loadPendingDevices();
 }
+
+// ===== Biometric Settings UI ================================================
+function _appUnlockToggles() {
+  return [document.getElementById("bio-app-unlock-toggle"), document.getElementById("staff-bio-app-unlock-toggle")]
+    .filter(Boolean);
+}
+
+async function initBiometricSettingsUI() {
+  const available = await Biometric.platformAvailable();
+  const enabled   = Biometric.isAppUnlockEnabled();
+  _appUnlockToggles().forEach(cb => { cb.checked = enabled; cb.disabled = !available; });
+  document.getElementById("bio-unsupported-note")?.classList.toggle("hidden", available);
+  document.getElementById("staff-bio-unsupported-note")?.classList.toggle("hidden", available);
+
+  const pinToggle = document.getElementById("bio-pin-toggle");
+  const pinRow    = document.getElementById("bio-pin-row");
+  if (pinToggle) {
+    pinToggle.checked  = Biometric.isPinUnlockEnabled();
+    pinToggle.disabled = !available;
+    pinRow?.classList.toggle("hidden", !available);
+  }
+}
+
+async function onToggleAppUnlock(sourceCb) {
+  const cb = sourceCb || event.target;
+  if (cb.checked) {
+    try {
+      await Biometric.enableAppUnlock(Auth.company || Auth.staffName || "S Attendance user");
+      showToast("Face ID / Fingerprint unlock enabled for this device.", "success");
+    } catch (err) {
+      cb.checked = false;
+      showToast(err.message || "Couldn't enable biometric unlock.", "error");
+    }
+  } else {
+    Biometric.disableAppUnlock();
+    showToast("Biometric app unlock turned off for this device.", "success");
+  }
+  // Both the admin and staff toggles reflect the same underlying per-device
+  // flag — keep them in sync even though only one is visible at a time.
+  _appUnlockToggles().forEach(other => { if (other !== cb) other.checked = Biometric.isAppUnlockEnabled(); });
+}
+
+async function onTogglePinUnlock() {
+  const cb = document.getElementById("bio-pin-toggle");
+  if (cb.checked) {
+    let succeeded = false;
+    await withPin(async (pinResult) => {
+      await apiFetch("/auth/pin-biometric-toggle", {
+        method: "PUT",
+        body: JSON.stringify({ enabled: true, ...pinAuthBody(pinResult) })
+      });
+      await Biometric.enablePinUnlock(Auth.company || "S Admin PIN");
+      succeeded = true;
+      showToast("Face ID / Fingerprint will now be used instead of your PIN.", "success");
+    });
+    if (!succeeded) cb.checked = false;
+  } else {
+    try { await apiFetch("/auth/pin-biometric-toggle", { method: "PUT", body: JSON.stringify({ enabled: false }) }); }
+    catch (_) { /* even if the server call fails, still fall back locally */ }
+    Biometric.disablePinUnlock();
+    showToast("Switched back to typing your PIN.", "success");
+  }
+}
+
+// One-time prompt offered right after a fresh sign-in (not shown again once
+// dismissed, and never shown again after the person enables or declines).
+async function maybeOfferBiometricEnroll() {
+  if (localStorage.getItem("bio_prompt_seen") === "1") return;
+  if (!(await Biometric.platformAvailable())) return;
+  localStorage.setItem("bio_prompt_seen", "1");
+  openModal("bio-prompt-modal");
+}
+async function acceptBiometricEnroll() {
+  try {
+    await Biometric.enableAppUnlock(Auth.company || Auth.staffName || "S Attendance user");
+    closeModal();
+    showToast("Face ID / Fingerprint unlock enabled!", "success");
+  } catch (err) {
+    closeModal();
+    showToast(err.message || "Couldn't enable biometric unlock.", "error");
+  }
+}
+function declineBiometricEnroll() { closeModal(); }
 
 function toggleIntFields() {
   document.getElementById("int-url-label").textContent =
@@ -2051,8 +2403,13 @@ window.addEventListener("appinstalled", () => {
 
 ActionOverlay.init();
 if (Auth.isLoggedIn()) {
-  if (Auth.role === "staff") showStaffShell();
-  else showAppShell();
+  if (!Biometric.isAppUnlockEnabled()) {
+    if (Auth.role === "staff") showStaffShell();
+    else showAppShell();
+  }
+  // If app-unlock IS enabled, we deliberately do nothing here — hideSplash()
+  // will show the lock screen once the splash finishes, and only reveal the
+  // dashboard (and fetch its data) after Face ID / Fingerprint succeeds.
 } else {
   const saved = sessionStorage.getItem("att_branding");
   if (saved) applyBranding(saved);
@@ -2061,6 +2418,7 @@ if (Auth.isLoggedIn()) {
 setInterval(()=>fetch(`${API_URL}/ping`).catch(()=>{}), 240000);
 setInterval(()=>{
   if (!Auth.isLoggedIn()||Auth.role==="staff") return;
+  if (!document.getElementById("lock-screen").classList.contains("hidden")) return;
   if (currentMainTab==="dashboard")  loadDashboard();
   if (currentMainTab==="attendance") renderAttendanceTable();
 }, 60000);

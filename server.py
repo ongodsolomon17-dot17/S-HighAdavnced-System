@@ -44,7 +44,13 @@ DATABASE_URL      = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set.")
 
-JWT_SECRET        = os.environ.get("JWT_SECRET",        "change-me-in-production")
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is not set. "
+        "Refusing to start with a guessable default — every login session, "
+        "PIN verification, and biometric proof in this app is signed with this secret."
+    )
 SUPERADMIN_SECRET = os.environ.get("SUPERADMIN_SECRET")
 if not SUPERADMIN_SECRET:
     raise RuntimeError(
@@ -121,6 +127,45 @@ def get_current_user() -> dict:
     if not auth.startswith("Bearer "):
         abort(401, description="Missing or invalid Authorization header.")
     return verify_token(auth[7:])
+
+
+# ===== PIN proof tokens ======================================================
+# Short-lived signed token issued after a PIN (or biometric-in-place-of-PIN)
+# check succeeds. Lets the frontend re-authorise a sensitive follow-up action
+# (change-password, change-pin, update-profile) without re-sending the raw
+# PIN digits — needed because a biometric unlock never produces a PIN string
+# to resend. Deliberately short-lived (3 minutes) and single-purpose so it
+# can't be reused as a general bearer token.
+_PIN_PROOF_TTL = 180
+
+def issue_pin_proof(user_id: int) -> str:
+    header  = _b64url(json.dumps({"alg": "HS256", "typ": "PINPROOF"}).encode())
+    payload = _b64url(json.dumps({
+        "sub": user_id,
+        "purpose": "pin_proof",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + _PIN_PROOF_TTL
+    }).encode())
+    sig = _b64url(hmac.new(
+        JWT_SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256
+    ).digest())
+    return f"{header}.{payload}.{sig}"
+
+def verify_pin_proof(token: str, user_id: int) -> bool:
+    try:
+        header, payload, sig = token.split(".")
+        expected = _b64url(hmac.new(
+            JWT_SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256
+        ).digest())
+        if not hmac.compare_digest(sig, expected):
+            return False
+        data = json.loads(_b64url_decode(payload))
+        if data.get("purpose") != "pin_proof": return False
+        if data.get("sub") != user_id:         return False
+        if data.get("exp", 0) < time.time():   return False
+        return True
+    except (ValueError, KeyError):
+        return False
 
 
 # ===== Password hashing =====================================================
@@ -339,6 +384,15 @@ def require_pin(user_id: int, data: dict):
     (stolen, replayed, or just read out of browser storage) could change
     the password/PIN/email with no PIN at all. This closes that gap.
     """
+    # A biometric unlock (in place of typing the PIN) has no PIN digits to
+    # resend, so it instead forwards the short-lived pin_proof issued at the
+    # time of that biometric check. Honour that path first.
+    pin_proof = data.get("pin_proof")
+    if pin_proof:
+        if not verify_pin_proof(pin_proof, user_id):
+            abort(403, description="PIN verification expired. Please verify again.")
+        return
+
     pin = clean_string(data.get("pin", ""), 4, "pin")
     if not pin or not PIN_RE.match(pin):
         abort(400, description="'pin' must be exactly 4 digits.")
@@ -708,6 +762,7 @@ def init_db():
         ("attendance", "lat",        "DOUBLE PRECISION"),
         ("attendance", "lng",        "DOUBLE PRECISION"),
         ("attendance", "shift_type", "TEXT"),
+        ("users", "pin_biometric_enabled", "BOOLEAN DEFAULT FALSE"),
     ]
     for table, col, definition in migrations:
         try:
@@ -1041,7 +1096,69 @@ def verify_pin():
             msg += " PIN locked. Check back after lockout period."
         abort(403, description=msg)
     record_successful_pin(user_id)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "pin_proof": issue_pin_proof(user_id)})
+
+
+@app.route("/auth/verify-pin-biometric", methods=["POST"])
+def verify_pin_biometric():
+    """
+    Lets an admin authorise a sensitive action with Face ID / Fingerprint
+    instead of typing their PIN. Only succeeds if:
+      1. The admin has explicitly opted in (pin_biometric_enabled=true),
+         which itself required entering the real PIN once to turn on, and
+      2. The request is coming from a device already on that admin's
+         trusted-devices list.
+    A valid JWT alone is never enough — this prevents a stolen token (e.g.
+    from a different machine) from bypassing the PIN just because the
+    feature happens to be enabled somewhere.
+    """
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    user_id = current["sub"]
+    check_pin_lockout(user_id)
+
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("SELECT pin_biometric_enabled FROM users WHERE id=%s", (user_id,))
+    user = c.fetchone()
+    if not user or not user["pin_biometric_enabled"]:
+        conn.close()
+        abort(403, description="Biometric PIN replacement isn't enabled for this account.")
+
+    device_fp = get_device_fp()
+    c.execute(
+        "SELECT id FROM trusted_devices WHERE user_id=%s AND role='admin' AND device_fingerprint=%s AND status='trusted'",
+        (user_id, device_fp)
+    )
+    trusted = c.fetchone()
+    conn.close()
+    if not trusted:
+        abort(403, description="This device isn't trusted. Please enter your PIN instead.")
+
+    record_successful_pin(user_id)
+    return jsonify({"ok": True, "pin_proof": issue_pin_proof(user_id)})
+
+
+@app.route("/auth/pin-biometric-toggle", methods=["PUT"])
+def pin_biometric_toggle():
+    """Admin enables/disables using Face ID / Fingerprint in place of the PIN.
+    Enabling requires the real PIN (proves the admin, not just a stolen JWT,
+    is making this change). Disabling never requires the PIN — turning off a
+    convenience feature can't reduce security, so no friction is needed."""
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data    = require_json()
+    enabled = bool(data.get("enabled"))
+    if enabled:
+        require_pin(current["sub"], data)
+    conn = get_db()
+    c    = conn.cursor()
+    c.execute("UPDATE users SET pin_biometric_enabled=%s WHERE id=%s", (enabled, current["sub"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "pin_biometric_enabled": enabled})
 
 
 @app.route("/auth/profile", methods=["GET"])
@@ -1054,7 +1171,7 @@ def get_profile():
                         checkin_time, checkout_time, night_checkin_time, night_checkout_time,
                         clockout_enabled, night_clockout_enabled,
                         auto_clockout_enabled, night_auto_clockout_enabled,
-                        sound_enabled, max_devices
+                        sound_enabled, max_devices, pin_biometric_enabled
                  FROM users WHERE id=%s""", (current["sub"],))
     user = c.fetchone()
     conn.close()
@@ -1535,32 +1652,50 @@ def record_attendance():
         settings = c.fetchone()
 
         # Geofence check
-        if settings and settings.get("geofence_enabled") and settings["geofence_lat"] and lat is not None and lng is not None:
-            dist = haversine_m(
-                settings["geofence_lat"], settings["geofence_lng"],
-                lat, lng
-            )
-            if dist > settings["geofence_radius"]:
+        if settings and settings.get("geofence_enabled") and settings["geofence_lat"]:
+            if lat is None or lng is None:
+                # BUG FIX: geofencing was silently skipped whenever lat/lng
+                # weren't sent (e.g. location permission denied, or the
+                # browser hadn't gotten a GPS fix yet) — meaning anyone could
+                # bypass geofencing entirely just by not sending a location.
+                # Enabled geofencing must fail *closed*, not open.
                 if current.get("role") == "admin":
-                    # Admins can override the geofence — but only if they
-                    # explicitly pass force=true after seeing the warning.
-                    # Without it return a warning response so the frontend
-                    # can show the "Location mismatch — proceed anyway?" popup.
                     if not data.get("force"):
-                        # Don't close conn here — the outer finally handles
-                        # it. Closing twice was harmless on psycopg2 directly
-                        # but unsafe behind a connection pooler (e.g.
-                        # Supabase's PgBouncer), which is the likely cause
-                        # of force=true requests failing afterward.
                         return jsonify({
                             "location_warning": True,
-                            "distance": int(dist),
+                            "distance": None,
                             "allowed":  settings["geofence_radius"],
-                            "message":  f"Staff location is {int(dist)}m away from the set location (allowed: {settings['geofence_radius']}m)."
+                            "message":  "No location was provided for this staff member, so geofencing couldn't be verified."
                         }), 200
                     # force=true: admin confirmed — fall through and record
                 else:
-                    abort(403, description=f"Unable to {action.replace('_',' ')} due to location mismatch. You are {int(dist)}m away (allowed: {settings['geofence_radius']}m).")
+                    abort(403, description="Location is required to clock in/out. Please enable location services and try again.")
+            else:
+                dist = haversine_m(
+                    settings["geofence_lat"], settings["geofence_lng"],
+                    lat, lng
+                )
+                if dist > settings["geofence_radius"]:
+                    if current.get("role") == "admin":
+                        # Admins can override the geofence — but only if they
+                        # explicitly pass force=true after seeing the warning.
+                        # Without it return a warning response so the frontend
+                        # can show the "Location mismatch — proceed anyway?" popup.
+                        if not data.get("force"):
+                            # Don't close conn here — the outer finally handles
+                            # it. Closing twice was harmless on psycopg2 directly
+                            # but unsafe behind a connection pooler (e.g.
+                            # Supabase's PgBouncer), which is the likely cause
+                            # of force=true requests failing afterward.
+                            return jsonify({
+                                "location_warning": True,
+                                "distance": int(dist),
+                                "allowed":  settings["geofence_radius"],
+                                "message":  f"Staff location is {int(dist)}m away from the set location (allowed: {settings['geofence_radius']}m)."
+                            }), 200
+                        # force=true: admin confirmed — fall through and record
+                    else:
+                        abort(403, description=f"Unable to {action.replace('_',' ')} due to location mismatch. You are {int(dist)}m away (allowed: {settings['geofence_radius']}m).")
 
         if not staff_exists(conn, current["sub"], staff_id):
             abort(404, description=f"Staff '{staff_id}' not found.")

@@ -45,6 +45,29 @@
   </div>
 </div>
 
+<!-- ══════ LOCK SCREEN (Face ID / Fingerprint app unlock) ══════ -->
+<div id="lock-screen" class="hidden">
+  <div class="auth-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+  <div class="splash-logo-wrap">
+    <div class="splash-ring"></div>
+    <div class="splash-ring-2"></div>
+    <div class="splash-s">S</div>
+  </div>
+  <p class="lock-screen-name" id="lock-screen-name">Welcome back</p>
+  <p class="lock-screen-sub">Unlock to continue</p>
+  <button id="lock-unlock-btn" class="bio-unlock-btn lock-unlock-btn" type="button" onclick="attemptAppUnlock()">
+    <span class="bio-icon">🫆</span> Unlock with Face ID / Fingerprint
+  </button>
+  <p class="pin-error hidden" id="lock-screen-error" style="text-align:center">Face ID / Fingerprint didn't match. Try again.</p>
+  <p class="hint" style="text-align:center;margin-top:18px">
+    <a href="#" onclick="event.preventDefault();useLockScreenPassword()">Not you? Sign in with password</a>
+  </p>
+</div>
+
 <!-- ══════ ACTION OVERLAY ══════
      Shown during admin/staff commands (check-in, add/update/delete staff, etc.)
      Avatar slot shows the user's profile logo instead of the S.
@@ -314,6 +337,24 @@
           <tbody></tbody>
         </table>
       </div>
+    </article>
+  </section>
+
+  <section>
+    <article class="card">
+      <h2>🫆 App Security</h2>
+      <p class="hint">Uses this device's own Face ID / Fingerprint. Nothing biometric is ever sent to our servers.</p>
+      <div class="bio-settings-row">
+        <div class="bio-settings-copy">
+          <div class="bio-settings-title">Unlock app with Face ID / Fingerprint</div>
+          <div class="bio-settings-desc">Skip typing your password when reopening the installed app on this device.</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="staff-bio-app-unlock-toggle" onchange="onToggleAppUnlock(this)" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="bio-unsupported-note hidden" id="staff-bio-unsupported-note">Face ID / Fingerprint isn't available on this device or browser.</p>
     </article>
   </section>
   <footer class="app-footer"><p>S Advanced Attendance — Staff Portal</p></footer>
@@ -647,6 +688,33 @@
           <p id="profile-edit-status" class="hint" style="margin-top:8px"></p>
         </article>
 
+        <!-- Biometric Security -->
+        <article class="card">
+          <h2>🫆 Biometric Security</h2>
+          <p class="hint">Uses this device's own Face ID / Fingerprint / Windows Hello. Nothing biometric is ever sent to our servers — it only unlocks what's already on this device.</p>
+          <div class="bio-settings-row">
+            <div class="bio-settings-copy">
+              <div class="bio-settings-title">Unlock app with Face ID / Fingerprint</div>
+              <div class="bio-settings-desc">Skip typing your password when reopening the installed app on this device.</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="bio-app-unlock-toggle" onchange="onToggleAppUnlock(this)" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="bio-settings-row" id="bio-pin-row">
+            <div class="bio-settings-copy">
+              <div class="bio-settings-title">Use Face ID / Fingerprint instead of PIN</div>
+              <div class="bio-settings-desc">Replace typing your 4-digit PIN for sensitive actions on this device.</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="bio-pin-toggle" onchange="onTogglePinUnlock()" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="bio-unsupported-note hidden" id="bio-unsupported-note">Face ID / Fingerprint isn't available on this device or browser. You'll continue using your password and PIN as normal.</p>
+        </article>
+
         <!-- Geofence -->
         <article class="card">
           <h2>📍 Geofence Settings</h2>
@@ -849,6 +917,9 @@
     <button class="modal-close" id="btn-close-pin">×</button>
   </div>
   <p class="pin-desc">Enter your admin PIN to authorise this action.</p>
+  <button id="btn-pin-biometric" class="primary bio-unlock-btn hidden" type="button">
+    <span class="bio-icon">🫆</span> Use Face ID / Fingerprint
+  </button>
   <div class="pin-inputs" id="pin-inputs">
     <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
     <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
@@ -856,9 +927,24 @@
     <input class="pin-box" type="password" maxlength="1" inputmode="numeric" />
   </div>
   <p class="pin-error hidden" id="pin-error">Incorrect PIN. Try again.</p>
+  <p class="hint hidden" id="pin-fallback-link" style="text-align:center;cursor:pointer;margin-top:6px">
+    <a href="#" onclick="event.preventDefault()">Enter PIN instead</a>
+  </p>
   <div class="modal-actions">
     <button class="primary"   id="btn-confirm-pin">Confirm</button>
     <button class="secondary" id="btn-close-pin2">Cancel</button>
+  </div>
+</div>
+
+<!-- ══════ BIOMETRIC ENROLLMENT PROMPT ══════ -->
+<div id="bio-prompt-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>🫆 Unlock faster next time?</h3>
+  </div>
+  <p class="pin-desc">Enable Face ID / Fingerprint to unlock this app instantly next time you open it — no password needed on this device.</p>
+  <div class="modal-actions">
+    <button class="primary"   onclick="acceptBiometricEnroll()">Enable</button>
+    <button class="secondary" onclick="declineBiometricEnroll()">Not now</button>
   </div>
 </div>
 
