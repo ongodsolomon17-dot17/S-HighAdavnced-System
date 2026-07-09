@@ -795,6 +795,46 @@ def init_db():
         conn.rollback()
         print(f"[MIGRATION] Warning: partial index: {e}", flush=True)
 
+    # ── CRITICAL FIX: staff device binding ──────────────────────────────────
+    # The staff-side INSERT in /devices/verify uses
+    # "ON CONFLICT (user_id, role, staff_id, device_fingerprint)", which
+    # requires an actual unique index on exactly those columns to exist.
+    # The inline UNIQUE(...) in CREATE TABLE only applies if the table is
+    # being created fresh — on any pre-existing deployment (i.e. this one)
+    # it was never retroactively added. Without it, that INSERT throws an
+    # unhandled "no unique or exclusion constraint matching ON CONFLICT"
+    # error on every second-or-later staff device, which the frontend was
+    # silently swallowing and treating as "allow access" — so staff device
+    # binding looked like it simply didn't exist.
+    #
+    # Dedupe first: months of that failure could have let plain (non-ON
+    # CONFLICT) inserts elsewhere create real duplicate rows, and creating a
+    # unique index over duplicates fails outright.
+    try:
+        c.execute("""
+            DELETE FROM trusted_devices a USING trusted_devices b
+            WHERE a.staff_id IS NOT NULL
+              AND a.id < b.id
+              AND a.user_id = b.user_id AND a.role = b.role
+              AND a.staff_id = b.staff_id AND a.device_fingerprint = b.device_fingerprint
+        """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"[MIGRATION] Warning: staff device dedupe: {e}", flush=True)
+
+    try:
+        c.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_trusted_devices_staff_fp
+            ON trusted_devices (user_id, role, staff_id, device_fingerprint)
+            WHERE staff_id IS NOT NULL
+        """)
+        conn.commit()
+        print("[MIGRATION] Partial index for staff device rows OK.", flush=True)
+    except Exception as e:
+        conn.rollback()
+        print(f"[MIGRATION] Warning: staff partial index: {e}", flush=True)
+
     # Drop the incorrectly-spelled duplicate tables that were created by an
     # earlier deployment before table names were corrected. The real tables
     # with actual data use the names in init_db above. These duplicates are
@@ -1652,7 +1692,13 @@ def record_attendance():
         settings = c.fetchone()
 
         # Geofence check
-        if settings and settings.get("geofence_enabled") and settings["geofence_lat"]:
+        if settings and settings.get("geofence_enabled") and settings["geofence_lat"] is not None:
+            # TEMPORARY DIAGNOSTIC LOGGING — remove once geofencing is
+            # confirmed working. Check Render's log output after a test
+            # clock-in/scan to see exactly what the server received.
+            print(f"[GEOFENCE-DEBUG] role={current.get('role')} action={action} "
+                  f"office=({settings['geofence_lat']},{settings['geofence_lng']}) "
+                  f"radius={settings['geofence_radius']} received=({lat},{lng})", flush=True)
             if lat is None or lng is None:
                 # BUG FIX: geofencing was silently skipped whenever lat/lng
                 # weren't sent (e.g. location permission denied, or the
@@ -1675,6 +1721,7 @@ def record_attendance():
                     settings["geofence_lat"], settings["geofence_lng"],
                     lat, lng
                 )
+                print(f"[GEOFENCE-DEBUG] computed distance={dist:.1f}m (radius={settings['geofence_radius']}m)", flush=True)
                 if dist > settings["geofence_radius"]:
                     if current.get("role") == "admin":
                         # Admins can override the geofence — but only if they
@@ -2562,16 +2609,41 @@ def verify_device():
                 conn.close()
                 return jsonify({"status": "rejected"})
 
-    # New unknown device for this staff — create a pending request
-    c.execute("""
-        INSERT INTO trusted_devices
-        (user_id, role, staff_id, device_fingerprint, device_name, created_at, last_used, expires_at, status)
-        VALUES (%s,'staff',%s,%s,%s,%s,%s,NULL,'pending')
-        ON CONFLICT (user_id, role, staff_id, device_fingerprint)
-        DO UPDATE SET status='pending', device_name=EXCLUDED.device_name,
-                       created_at=EXCLUDED.created_at, expires_at=NULL
-    """, (current["sub"], staff_id, fingerprint, device_name,
-          datetime.utcnow().isoformat(), now))
+    # New unknown device for this staff — create a pending request.
+    # ON CONFLICT must target the partial index created in init_db
+    # (idx_trusted_devices_staff_fp); the WHERE clause has to match exactly
+    # for Postgres to use it as the conflict target.
+    try:
+        c.execute("""
+            INSERT INTO trusted_devices
+            (user_id, role, staff_id, device_fingerprint, device_name, created_at, last_used, expires_at, status)
+            VALUES (%s,'staff',%s,%s,%s,%s,%s,NULL,'pending')
+            ON CONFLICT (user_id, role, staff_id, device_fingerprint) WHERE staff_id IS NOT NULL
+            DO UPDATE SET status='pending', device_name=EXCLUDED.device_name,
+                           created_at=EXCLUDED.created_at, expires_at=NULL
+        """, (current["sub"], staff_id, fingerprint, device_name,
+              datetime.utcnow().isoformat(), now))
+    except Exception:
+        # Fallback for the rare case the partial index isn't in place yet
+        # on this deployment (e.g. migration hasn't run) — check manually.
+        conn.rollback()
+        c.execute("""
+            SELECT id FROM trusted_devices
+            WHERE user_id=%s AND role='staff' AND staff_id=%s AND device_fingerprint=%s
+        """, (current["sub"], staff_id, fingerprint))
+        existing = c.fetchone()
+        if existing:
+            c.execute(
+                "UPDATE trusted_devices SET status='pending', device_name=%s, created_at=%s, expires_at=NULL WHERE id=%s",
+                (device_name, datetime.utcnow().isoformat(), existing["id"])
+            )
+        else:
+            c.execute("""
+                INSERT INTO trusted_devices
+                (user_id, role, staff_id, device_fingerprint, device_name, created_at, last_used, expires_at, status)
+                VALUES (%s,'staff',%s,%s,%s,%s,%s,NULL,'pending')
+            """, (current["sub"], staff_id, fingerprint, device_name,
+                  datetime.utcnow().isoformat(), now))
     conn.commit()
     conn.close()
     return jsonify({"status": "pending"})
