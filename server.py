@@ -1991,18 +1991,21 @@ def analytics():
     """, (current["sub"], month_ago))
     freq_rows = [dict(r) for r in c.fetchall()]
 
+    # "Still clocked in" = each staff member's most recent attendance record
+    # (regardless of which calendar date it happened on) is a check_in with
+    # no check_out after it. Constraining this to "today's date" was the bug:
+    # a night-shift check-in at 10pm is stamped with yesterday's date, so
+    # once the clock passed midnight it would stop matching "today" entirely
+    # and silently disappear from this list while the person was still on
+    # shift.
     c.execute("""
-        SELECT DISTINCT a.staff_id, s.name
+        SELECT DISTINCT ON (a.staff_id) a.staff_id, s.name, a.action
         FROM attendance a
         LEFT JOIN staff s ON s.id=a.staff_id AND s.user_id=a.user_id
-        WHERE a.user_id=%s AND a.action='check_in' AND a.timestamp LIKE %s
-        AND NOT EXISTS (
-            SELECT 1 FROM attendance b
-            WHERE b.user_id=a.user_id AND b.staff_id=a.staff_id
-            AND b.action='check_out' AND b.timestamp LIKE %s
-        )
-    """, (current["sub"], today + "%", today + "%"))
-    still_in = [dict(r) for r in c.fetchall()]
+        WHERE a.user_id=%s
+        ORDER BY a.staff_id, a.timestamp DESC
+    """, (current["sub"],))
+    still_in = [{"staff_id": r["staff_id"], "name": r["name"]} for r in c.fetchall() if r["action"] == "check_in"]
 
     trend = []
     for i in range(13, -1, -1):
@@ -2802,17 +2805,18 @@ def ping():
 # ===== Auto Clock-Out Background Job ========================================
 def _auto_clockout_worker():
     """
-    Runs every 60 seconds. For each company that has auto_clockout_enabled
-    or night_auto_clockout_enabled turned on, finds staff who are still
-    checked in past their shift's checkout time and inserts a check_out
-    record on their behalf.
+    Runs roughly every 60 seconds (best-effort — see _clockout_overdue for
+    why this no longer needs to be exact). For each company that has
+    auto_clockout_enabled or night_auto_clockout_enabled turned on, finds
+    staff who are still checked in past their shift's checkout deadline and
+    inserts a check_out record on their behalf.
 
-    Uses UTC time. Since the admin sets checkout_time in local time but
-    timestamps are stored in UTC, we compare current UTC hour:minute against
-    the stored HH:MM value offset by 0 (UTC+0). If your server and admin
-    are both in UTC+1, the relative comparison is still correct because both
-    sides are shifted by the same amount. For full multi-timezone support,
-    store a tz_offset column — out of scope for now.
+    Uses UTC time throughout. Since the admin sets checkout_time in local
+    time but timestamps are stored in UTC, the deadline is computed as an
+    offset from each check-in's own UTC timestamp, so the comparison stays
+    correct as long as the admin and server agree on what "local" means.
+    For full multi-timezone support, store a tz_offset column — out of
+    scope for now.
     """
     print("[AUTO-CLOCKOUT] Worker started.", flush=True)
     while True:
@@ -2824,10 +2828,7 @@ def _auto_clockout_worker():
 
 
 def _run_auto_clockout():
-    now     = datetime.utcnow()
-    now_str = now.isoformat()
-    # Format current time as HH:MM for comparison
-    now_hhmm = now.strftime("%H:%M")
+    now  = datetime.utcnow()
 
     conn = get_db()
     c    = conn.cursor()
@@ -2844,26 +2845,40 @@ def _run_auto_clockout():
     for co in companies:
         user_id = co["id"]
 
-        # --- Day shift auto clock-out ---
         if co["auto_clockout_enabled"] and co["checkout_time"]:
-            if now_hhmm == co["checkout_time"]:
-                _clockout_still_in(c, user_id, "day", now_str)
+            _clockout_overdue(c, user_id, "day", co["checkout_time"], now)
 
-        # --- Night shift auto clock-out ---
         if co["night_auto_clockout_enabled"] and co["night_checkout_time"]:
-            if now_hhmm == co["night_checkout_time"]:
-                _clockout_still_in(c, user_id, "night", now_str)
+            _clockout_overdue(c, user_id, "night", co["night_checkout_time"], now)
 
     conn.commit()
     conn.close()
 
 
-def _clockout_still_in(c, user_id: int, shift: str, now_str: str):
-    """Insert a system-generated check_out for every staff member who is
-    still checked in (last action = check_in) for this company and shift."""
-    # Find staff whose most recent attendance record is a check_in
+def _clockout_overdue(c, user_id: int, shift: str, checkout_hhmm: str, now: datetime):
+    """Clock out any staff member of this company/shift whose personal
+    checkout deadline has already passed. The deadline is the next
+    occurrence of checkout_hhmm strictly after their own check-in timestamp
+    — computed per check-in, not by matching the worker's current wall
+    clock against checkout_hhmm. That per-tick exact-match approach was the
+    bug: this worker only polls once a minute, and any drift in that loop
+    (a slow DB call, a GC pause, a process restart mid-cycle — all normal
+    on a shared Render instance) meant the single matching minute could be
+    skipped outright, silently leaving people clocked in with no way to
+    catch up until the next day. Computing an absolute deadline per person
+    and checking >= is self-healing: a late or restarted worker still
+    catches everyone who's overdue on its very next tick. This also handles
+    night shifts crossing midnight correctly, since the deadline rolls to
+    the day after the check-in whenever checkout_hhmm falls at/before the
+    check-in's own time of day.
+    """
+    try:
+        target_h, target_m = (int(x) for x in checkout_hhmm.split(":"))
+    except (ValueError, AttributeError):
+        return
+
     c.execute("""
-        SELECT DISTINCT ON (a.staff_id) a.staff_id, a.action, a.shift_type
+        SELECT DISTINCT ON (a.staff_id) a.staff_id, a.action, a.shift_type, a.timestamp
         FROM attendance a
         WHERE a.user_id = %s
         ORDER BY a.staff_id, a.timestamp DESC
@@ -2872,15 +2887,25 @@ def _clockout_still_in(c, user_id: int, shift: str, now_str: str):
     for row in rows:
         if row["action"] != "check_in":
             continue
-        # Only auto-clock out if the shift matches (or record has no shift)
         rec_shift = row["shift_type"]
         if rec_shift and rec_shift != shift:
             continue
-        c.execute("""
-            INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng, shift_type)
-            VALUES (%s, %s, 'check_out', %s, NULL, NULL, %s)
-        """, (user_id, row["staff_id"], now_str, shift))
-        print(f"[AUTO-CLOCKOUT] Clocked out {row['staff_id']} (company {user_id}, {shift} shift)", flush=True)
+        try:
+            checkin_ts = datetime.fromisoformat(row["timestamp"])
+        except ValueError:
+            continue
+
+        deadline = checkin_ts.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+        if deadline <= checkin_ts:
+            deadline += timedelta(days=1)
+
+        if now >= deadline:
+            c.execute("""
+                INSERT INTO attendance (user_id, staff_id, action, timestamp, lat, lng, shift_type)
+                VALUES (%s, %s, 'check_out', %s, NULL, NULL, %s)
+            """, (user_id, row["staff_id"], now.isoformat(), shift))
+            print(f"[AUTO-CLOCKOUT] Clocked out {row['staff_id']} (company {user_id}, {shift} shift, "
+                  f"deadline was {deadline.isoformat()})", flush=True)
 
 
 # Start the daemon thread after init_db() has run but before any request
