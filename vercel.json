@@ -19,16 +19,10 @@
       ]
     },
     {
-      "source": "/service-worker.js",
+      "source": "/service worker.js",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache" },
         { "key": "Service-Worker-Allowed", "value": "/" }
-      ]
-    },
-    {
-      "source": "/(index.html|app.js|style.css)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
       ]
     },
     {
