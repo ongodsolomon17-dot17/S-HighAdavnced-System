@@ -1213,6 +1213,81 @@ def pin_biometric_toggle():
     return jsonify({"ok": True, "pin_biometric_enabled": enabled})
 
 
+@app.route("/auth/account", methods=["DELETE"])
+def delete_admin_account():
+    """Admin self-service account deletion. Permanently deletes the whole
+    company: every staff member, all attendance history, devices, notices,
+    integrations, and the admin's own login. Requires PIN (or the
+    biometric-PIN-replacement pin_proof) — the same sensitive-action gate
+    used everywhere else in this app — since this is irreversible."""
+    current = get_current_user()
+    if current.get("role") != "admin":
+        abort(403, description="Admin only.")
+    data = require_json()
+    require_pin(current["sub"], data)
+
+    user_id = current["sub"]
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT email FROM users WHERE id=%s", (user_id,))
+        row = c.fetchone()
+        if not row:
+            abort(404)
+        email = row["email"]
+        # notices has a FOREIGN KEY to users with no ON DELETE CASCADE, so it
+        # must be deleted before the users row or the final DELETE would
+        # fail outright with a foreign-key violation. notice_reads cascades
+        # automatically from notices' own ON DELETE CASCADE.
+        c.execute("DELETE FROM notices              WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM attendance           WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM staff_accounts       WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM staff                WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM external_intergrations WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM trusted_devices       WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM pin_attempts          WHERE user_id=%s", (user_id,))
+        c.execute("DELETE FROM login_attemps         WHERE identifier=%s", (email,))
+        c.execute("DELETE FROM password_resets       WHERE email=%s",      (email,))
+        c.execute("DELETE FROM users                 WHERE id=%s",         (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"message": "Account deleted."})
+
+
+@app.route("/staff-auth/account", methods=["DELETE"])
+def delete_staff_account():
+    """Staff self-service account deletion. Staff don't have a PIN, so this
+    requires re-entering their password as proof it's really them (and not
+    just someone who got hold of a valid session token)."""
+    current = get_current_user()
+    if current.get("role") != "staff":
+        abort(403, description="Staff only.")
+    data     = require_json()
+    password = str(data.get("password", ""))
+    if not password:
+        abort(400, description="Password is required to delete your account.")
+
+    user_id  = current["sub"]
+    staff_id = current.get("staff_id")
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT password FROM staff_accounts WHERE user_id=%s AND staff_id=%s", (user_id, staff_id))
+        row = c.fetchone()
+        if not row or not check_password(password, row["password"]):
+            abort(403, description="Incorrect password.")
+        c.execute("DELETE FROM attendance      WHERE staff_id=%s AND user_id=%s", (staff_id, user_id))
+        c.execute("DELETE FROM notice_reads    WHERE staff_id=%s", (staff_id,))
+        c.execute("DELETE FROM staff_accounts  WHERE staff_id=%s AND user_id=%s", (staff_id, user_id))
+        c.execute("DELETE FROM trusted_devices WHERE staff_id=%s AND user_id=%s AND role='staff'", (staff_id, user_id))
+        c.execute("DELETE FROM staff           WHERE id=%s AND user_id=%s", (staff_id, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"message": "Account deleted."})
+
+
 @app.route("/auth/profile", methods=["GET"])
 def get_profile():
     current = get_current_user()
@@ -2249,6 +2324,7 @@ def superadmin_delete_user(user_id):
         user_row = c.fetchone()
         if not user_row:
             abort(404)
+        c.execute("DELETE FROM notices               WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM attendance            WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM staff_accounts        WHERE user_id=%s", (user_id,))
         c.execute("DELETE FROM staff                 WHERE user_id=%s", (user_id,))
@@ -2259,6 +2335,7 @@ def superadmin_delete_user(user_id):
         # re-registers with this same address doesn't inherit a stranger's
         # failed-login lockout state.
         c.execute("DELETE FROM login_attemps WHERE identifier=%s", (user_row["email"],))
+        c.execute("DELETE FROM password_resets       WHERE email=%s", (user_row["email"],))
         c.execute("DELETE FROM users                 WHERE id=%s",      (user_id,))
         conn.commit()
     finally:
@@ -2833,26 +2910,43 @@ def _run_auto_clockout():
     conn = get_db()
     c    = conn.cursor()
 
-    # Load all companies that have at least one auto-clockout enabled
-    c.execute("""
-        SELECT id, checkout_time, night_checkout_time,
-               auto_clockout_enabled, night_auto_clockout_enabled
-        FROM users
-        WHERE auto_clockout_enabled = TRUE OR night_auto_clockout_enabled = TRUE
-    """)
-    companies = c.fetchall()
+    # Multiple gunicorn workers each run their own independent copy of this
+    # background thread (it starts at module import time, which happens once
+    # per worker process). Without a lock, two workers could both see the
+    # same overdue staff member as "still checked in" in the same race
+    # window and each insert their own duplicate check_out. A session-level
+    # Postgres advisory lock ensures only one worker's tick actually runs the
+    # sweep; any other worker that misses the lock just skips this cycle —
+    # harmless, since another tick follows in ~60 seconds.
+    c.execute("SELECT pg_try_advisory_lock(892741055)")
+    got_lock = c.fetchone()["pg_try_advisory_lock"]
+    if not got_lock:
+        conn.close()
+        return
 
-    for co in companies:
-        user_id = co["id"]
+    try:
+        # Load all companies that have at least one auto-clockout enabled
+        c.execute("""
+            SELECT id, checkout_time, night_checkout_time,
+                   auto_clockout_enabled, night_auto_clockout_enabled
+            FROM users
+            WHERE auto_clockout_enabled = TRUE OR night_auto_clockout_enabled = TRUE
+        """)
+        companies = c.fetchall()
 
-        if co["auto_clockout_enabled"] and co["checkout_time"]:
-            _clockout_overdue(c, user_id, "day", co["checkout_time"], now)
+        for co in companies:
+            user_id = co["id"]
 
-        if co["night_auto_clockout_enabled"] and co["night_checkout_time"]:
-            _clockout_overdue(c, user_id, "night", co["night_checkout_time"], now)
+            if co["auto_clockout_enabled"] and co["checkout_time"]:
+                _clockout_overdue(c, user_id, "day", co["checkout_time"], now)
 
-    conn.commit()
-    conn.close()
+            if co["night_auto_clockout_enabled"] and co["night_checkout_time"]:
+                _clockout_overdue(c, user_id, "night", co["night_checkout_time"], now)
+
+        conn.commit()
+    finally:
+        c.execute("SELECT pg_advisory_unlock(892741055)")
+        conn.close()
 
 
 def _clockout_overdue(c, user_id: int, shift: str, checkout_hhmm: str, now: datetime):

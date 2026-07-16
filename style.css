@@ -167,11 +167,49 @@ html, body {
 .bio-settings-row:not(:last-child) { border-bottom: 1px solid var(--glass-border); }
 .bio-settings-copy .bio-settings-title { font-weight: 600; color: var(--text); font-size: 0.92rem; }
 .bio-settings-copy .bio-settings-desc  { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
-.bio-unsupported-note {
-  font-size: 0.8rem; color: var(--text-muted);
+/* ═══════════════════════════
+   SETTINGS ACCORDION
+═══════════════════════════ */
+.settings-accordion { display: flex; flex-direction: column; gap: 12px; }
+
+.settings-category-header {
+  width: 100%; display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px; border-radius: 16px; cursor: pointer;
   background: var(--glass); border: 1px solid var(--glass-border);
-  border-radius: 10px; padding: 10px 12px; margin-top: 10px;
+  text-align: left; font-family: inherit;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
+.settings-category-header:hover  { background: rgba(255,255,255,0.07); }
+.settings-category-header:active { transform: scale(0.99); }
+.settings-category-header-danger { border-color: rgba(255,90,90,0.35); }
+
+.settings-cat-icon { font-size: 1.5rem; line-height: 1; flex-shrink: 0; }
+.settings-cat-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.settings-cat-title { font-weight: 700; font-size: 0.98rem; color: var(--text); }
+.settings-cat-desc  { font-size: 0.8rem; color: var(--text-muted); }
+.settings-cat-chevron { font-size: 1.4rem; color: var(--text-muted); flex-shrink: 0; }
+
+.settings-category-body { margin-top: 8px; }
+.settings-category-toolbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 2px 14px;
+  background: linear-gradient(var(--bg,#070e1f) 65%, transparent);
+}
+.settings-category-toolbar-title { font-weight: 700; font-size: 0.95rem; color: var(--text); }
+.settings-category-content { display: flex; flex-direction: column; gap: 16px; }
+
+/* When a category is open, hide every other category's collapsed header so
+   the open one takes over the panel like a drill-down view. */
+.settings-accordion.category-active .settings-category:not(.open) { display: none; }
+
+.danger-card { border-color: rgba(255,90,90,0.35); }
+button.danger {
+  background: linear-gradient(135deg,#e5484d,#b91c1c); color: #fff;
+  border: none; border-radius: 12px; padding: 10px 18px;
+  font-weight: 700; font-size: 13px; cursor: pointer;
+}
+button.danger:hover { filter: brightness(1.08); }
 
 .blob {
   position: absolute; border-radius: 50%;

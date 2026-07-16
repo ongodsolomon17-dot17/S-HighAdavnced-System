@@ -1692,6 +1692,73 @@ async function acceptBiometricEnroll() {
 }
 function declineBiometricEnroll() { closeModal(); }
 
+// ===== Settings Accordion ====================================================
+function openSettingsCategory(name) {
+  const accordion = document.getElementById("settings-accordion");
+  accordion.classList.add("category-active");
+  document.querySelectorAll(".settings-category").forEach(cat => {
+    const isTarget = cat.dataset.category === name;
+    cat.classList.toggle("open", isTarget);
+    cat.querySelector(".settings-category-body").classList.toggle("hidden", !isTarget);
+  });
+  accordion.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function closeSettingsCategory() {
+  const accordion = document.getElementById("settings-accordion");
+  accordion.classList.remove("category-active");
+  document.querySelectorAll(".settings-category").forEach(cat => {
+    cat.classList.remove("open");
+    cat.querySelector(".settings-category-body").classList.add("hidden");
+  });
+}
+
+function openDeleteAccountModal() {
+  const input = document.getElementById("delete-account-confirm-text");
+  input.value = "";
+  document.getElementById("btn-confirm-delete-account").disabled = true;
+  document.getElementById("delete-account-error").classList.add("hidden");
+  openModal("delete-account-modal");
+}
+
+async function confirmDeleteAdminAccount() {
+  const btn = document.getElementById("btn-confirm-delete-account");
+  const err = document.getElementById("delete-account-error");
+  err.classList.add("hidden");
+  await withPin(async (pinResult) => {
+    btn.disabled = true;
+    try {
+      await apiFetch("/auth/account", { method: "DELETE", body: JSON.stringify(pinAuthBody(pinResult)) });
+      handleAccountDeleted();
+    } catch (e) {
+      err.textContent = e.message || "Couldn't delete your account.";
+      err.classList.remove("hidden");
+      btn.disabled = false;
+    }
+  });
+}
+
+async function confirmDeleteStaffAccount() {
+  const password = document.getElementById("staff-delete-password").value;
+  const err = document.getElementById("staff-delete-account-error");
+  err.classList.add("hidden");
+  if (!password) { err.textContent = "Please enter your password."; err.classList.remove("hidden"); return; }
+  try {
+    await apiFetch("/staff-auth/account", { method: "DELETE", body: JSON.stringify({ password }) });
+    handleAccountDeleted();
+  } catch (e) {
+    err.textContent = e.message || "Couldn't delete your account.";
+    err.classList.remove("hidden");
+  }
+}
+
+function handleAccountDeleted() {
+  closeModal();
+  Auth.clear();
+  showAuthShell();
+  switchTab("login");
+  showToast("Your account has been permanently deleted.", "success");
+}
+
 function toggleIntFields() {
   document.getElementById("int-url-label").textContent =
     document.getElementById("int-type").value === "google_sheets" ? "Apps Script URL" : "Webhook URL";

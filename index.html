@@ -357,6 +357,16 @@
       <p class="bio-unsupported-note hidden" id="staff-bio-unsupported-note">Face ID / Fingerprint isn't available on this device or browser.</p>
     </article>
   </section>
+
+  <section>
+    <article class="card danger-card">
+      <h2>🗑️ Delete My Account</h2>
+      <p class="hint">Permanently delete your staff account and attendance history with this company. This cannot be undone.</p>
+      <div class="button-row" style="margin-top:12px">
+        <button class="danger" onclick="openModal('staff-delete-account-modal')">Delete My Account</button>
+      </div>
+    </article>
+  </section>
   <footer class="app-footer"><p>S Advanced Attendance — Staff Portal</p></footer>
 </div>
 
@@ -625,8 +635,24 @@
 
     <!-- SETTINGS -->
     <section id="tab-settings" class="tab-panel hidden">
-      <div class="grid-two">
+      <div class="settings-accordion" id="settings-accordion">
 
+        <div class="settings-category" data-category="company">
+          <button type="button" class="settings-category-header" onclick="openSettingsCategory('company')">
+            <span class="settings-cat-icon">🏢</span>
+            <span class="settings-cat-info">
+              <span class="settings-cat-title">Company & Profile</span>
+              <span class="settings-cat-desc">Logo, company details, login, password & PIN</span>
+            </span>
+            <span class="settings-cat-chevron">›</span>
+          </button>
+          <div class="settings-category-body hidden">
+            <div class="settings-category-toolbar">
+              <button type="button" class="secondary" onclick="closeSettingsCategory()">‹ Back</button>
+              <span class="settings-category-toolbar-title">Company & Profile</span>
+              <button type="button" class="primary" onclick="closeSettingsCategory()">Done</button>
+            </div>
+            <div class="settings-category-content">
         <!-- Profile Picture -->
         <article class="card">
           <h2> Company Profile</h2>
@@ -687,7 +713,26 @@
           </div>
           <p id="profile-edit-status" class="hint" style="margin-top:8px"></p>
         </article>
+            </div>
+          </div>
+        </div>
 
+        <div class="settings-category" data-category="security">
+          <button type="button" class="settings-category-header" onclick="openSettingsCategory('security')">
+            <span class="settings-cat-icon">🫆</span>
+            <span class="settings-cat-info">
+              <span class="settings-cat-title">Security & Devices</span>
+              <span class="settings-cat-desc">Biometric unlock, trusted devices & approvals</span>
+            </span>
+            <span class="settings-cat-chevron">›</span>
+          </button>
+          <div class="settings-category-body hidden">
+            <div class="settings-category-toolbar">
+              <button type="button" class="secondary" onclick="closeSettingsCategory()">‹ Back</button>
+              <span class="settings-category-toolbar-title">Security & Devices</span>
+              <button type="button" class="primary" onclick="closeSettingsCategory()">Done</button>
+            </div>
+            <div class="settings-category-content">
         <!-- Biometric Security -->
         <article class="card">
           <h2>🫆 Biometric Security</h2>
@@ -715,6 +760,49 @@
           <p class="bio-unsupported-note hidden" id="bio-unsupported-note">Face ID / Fingerprint isn't available on this device or browser. You'll continue using your password and PIN as normal.</p>
         </article>
 
+        <!-- Max Trusted Devices -->
+        <article class="card">
+          <h2>🔒 Trusted Devices</h2>
+          <p class="hint">Set how many devices can be trusted for your admin account (max 5).</p>
+          <div class="form-grid" style="margin-top:12px">
+            <label>Max Devices</label>
+            <input id="max-devices" type="number" min="1" max="5" value="3" style="max-width:80px" />
+          </div>
+          <div class="button-row" style="margin-top:10px">
+            <button class="accent" onclick="saveMaxDevices()">Save Limit</button>
+          </div>
+          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+          <p style="font-size:13px;font-weight:700;margin-bottom:8px">My Trusted Devices</p>
+          <div id="devices-list"><p class="hint">Loading…</p></div>
+          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
+          <p style="font-size:13px;font-weight:700;margin-bottom:8px">
+            📱 Pending Staff Device Requests
+            <span id="pending-devices-badge" class="hidden"
+              style="display:inline-block;background:var(--danger);color:#fff;
+                     border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;margin-left:6px">0</span>
+          </p>
+          <div id="pending-devices-list"><p class="hint">Loading…</p></div>
+        </article>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-category" data-category="attendance">
+          <button type="button" class="settings-category-header" onclick="openSettingsCategory('attendance')">
+            <span class="settings-cat-icon">📍</span>
+            <span class="settings-cat-info">
+              <span class="settings-cat-title">Attendance Rules</span>
+              <span class="settings-cat-desc">Geofencing, work schedule & shift clock-out</span>
+            </span>
+            <span class="settings-cat-chevron">›</span>
+          </button>
+          <div class="settings-category-body hidden">
+            <div class="settings-category-toolbar">
+              <button type="button" class="secondary" onclick="closeSettingsCategory()">‹ Back</button>
+              <span class="settings-category-toolbar-title">Attendance Rules</span>
+              <button type="button" class="primary" onclick="closeSettingsCategory()">Done</button>
+            </div>
+            <div class="settings-category-content">
         <!-- Geofence -->
         <article class="card">
           <h2>📍 Geofence Settings</h2>
@@ -800,7 +888,26 @@
           </div>
           <p class="hint" id="sched-status" style="margin-top:8px"></p>
         </article>
+            </div>
+          </div>
+        </div>
 
+        <div class="settings-category" data-category="prefs">
+          <button type="button" class="settings-category-header" onclick="openSettingsCategory('prefs')">
+            <span class="settings-cat-icon">🔊</span>
+            <span class="settings-cat-info">
+              <span class="settings-cat-title">Preferences</span>
+              <span class="settings-cat-desc">Check-in sounds and tones</span>
+            </span>
+            <span class="settings-cat-chevron">›</span>
+          </button>
+          <div class="settings-category-body hidden">
+            <div class="settings-category-toolbar">
+              <button type="button" class="secondary" onclick="closeSettingsCategory()">‹ Back</button>
+              <span class="settings-category-toolbar-title">Preferences</span>
+              <button type="button" class="primary" onclick="closeSettingsCategory()">Done</button>
+            </div>
+            <div class="settings-category-content">
         <!-- Sound Settings -->
         <article class="card">
           <h2> Sound Settings</h2>
@@ -832,31 +939,26 @@
           </div>
           <p class="hint" style="margin-top:10px">The "Device notification" option plays your device's system notification sound (requires notification permission).</p>
         </article>
-
-        <!-- Max Trusted Devices -->
-        <article class="card">
-          <h2>🔒 Trusted Devices</h2>
-          <p class="hint">Set how many devices can be trusted for your admin account (max 5).</p>
-          <div class="form-grid" style="margin-top:12px">
-            <label>Max Devices</label>
-            <input id="max-devices" type="number" min="1" max="5" value="3" style="max-width:80px" />
+            </div>
           </div>
-          <div class="button-row" style="margin-top:10px">
-            <button class="accent" onclick="saveMaxDevices()">Save Limit</button>
-          </div>
-          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
-          <p style="font-size:13px;font-weight:700;margin-bottom:8px">My Trusted Devices</p>
-          <div id="devices-list"><p class="hint">Loading…</p></div>
-          <hr style="border-color:rgba(255,255,255,0.08);margin:16px 0" />
-          <p style="font-size:13px;font-weight:700;margin-bottom:8px">
-            📱 Pending Staff Device Requests
-            <span id="pending-devices-badge" class="hidden"
-              style="display:inline-block;background:var(--danger);color:#fff;
-                     border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;margin-left:6px">0</span>
-          </p>
-          <div id="pending-devices-list"><p class="hint">Loading…</p></div>
-        </article>
+        </div>
 
+        <div class="settings-category" data-category="integrations">
+          <button type="button" class="settings-category-header" onclick="openSettingsCategory('integrations')">
+            <span class="settings-cat-icon">🔗</span>
+            <span class="settings-cat-info">
+              <span class="settings-cat-title">Integrations</span>
+              <span class="settings-cat-desc">Push attendance to a webhook or Google Sheet</span>
+            </span>
+            <span class="settings-cat-chevron">›</span>
+          </button>
+          <div class="settings-category-body hidden">
+            <div class="settings-category-toolbar">
+              <button type="button" class="secondary" onclick="closeSettingsCategory()">‹ Back</button>
+              <span class="settings-category-toolbar-title">Integrations</span>
+              <button type="button" class="primary" onclick="closeSettingsCategory()">Done</button>
+            </div>
+            <div class="settings-category-content">
         <!-- External Integration -->
         <article class="card">
           <h2>🔗 External Integration</h2>
@@ -876,6 +978,37 @@
           </div>
           <div id="int-status" class="hint" style="margin-top:8px"></div>
         </article>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-category" data-category="danger">
+          <button type="button" class="settings-category-header settings-category-header-danger" onclick="openSettingsCategory('danger')">
+            <span class="settings-cat-icon">⚠️</span>
+            <span class="settings-cat-info">
+              <span class="settings-cat-title">Danger Zone</span>
+              <span class="settings-cat-desc">Delete your account permanently</span>
+            </span>
+            <span class="settings-cat-chevron">›</span>
+          </button>
+          <div class="settings-category-body hidden">
+            <div class="settings-category-toolbar">
+              <button type="button" class="secondary" onclick="closeSettingsCategory()">‹ Back</button>
+              <span class="settings-category-toolbar-title">Danger Zone</span>
+              <button type="button" class="primary" onclick="closeSettingsCategory()">Done</button>
+            </div>
+            <div class="settings-category-content">
+        <!-- Delete Account -->
+        <article class="card danger-card">
+          <h2>🗑️ Delete Account</h2>
+          <p class="hint">Permanently delete your company account — this removes every staff member, all attendance history, devices, notices, and settings. This cannot be undone.</p>
+          <div class="button-row" style="margin-top:12px">
+            <button class="danger" onclick="openDeleteAccountModal()">Delete My Account</button>
+          </div>
+        </article>
+            </div>
+          </div>
+        </div>
 
       </div>
     </section>
@@ -945,6 +1078,45 @@
   <div class="modal-actions">
     <button class="primary"   onclick="acceptBiometricEnroll()">Enable</button>
     <button class="secondary" onclick="declineBiometricEnroll()">Not now</button>
+  </div>
+</div>
+
+<!-- ══════ DELETE ACCOUNT (ADMIN) ══════ -->
+<div id="delete-account-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>🗑️ Delete Account</h3>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <p class="pin-desc">This permanently deletes your company, every staff member, all attendance history, devices and notices. <strong>This cannot be undone.</strong></p>
+  <div class="form-grid" style="margin-top:10px">
+    <label>Type <strong>DELETE</strong> to confirm</label>
+    <input id="delete-account-confirm-text" type="text" autocomplete="off" placeholder="DELETE" oninput="document.getElementById('btn-confirm-delete-account').disabled = this.value.trim() !== 'DELETE'" />
+  </div>
+  <p class="pin-error hidden" id="delete-account-error"></p>
+  <div class="modal-actions">
+    <button class="danger" id="btn-confirm-delete-account" disabled onclick="confirmDeleteAdminAccount()">Delete Permanently</button>
+    <button class="secondary" onclick="closeModal()">Cancel</button>
+  </div>
+</div>
+
+<!-- ══════ DELETE ACCOUNT (STAFF) ══════ -->
+<div id="staff-delete-account-modal" class="modal hidden">
+  <div class="modal-header">
+    <h3>🗑️ Delete My Account</h3>
+    <button class="modal-close" onclick="closeModal()">×</button>
+  </div>
+  <p class="pin-desc">This permanently deletes your staff account and attendance history with this company. <strong>This cannot be undone.</strong></p>
+  <div class="form-grid" style="margin-top:10px">
+    <label>Confirm your password</label>
+    <div class="input-eye">
+      <input id="staff-delete-password" type="password" autocomplete="current-password" />
+      <button type="button" class="eye-btn" onclick="toggleEye('staff-delete-password',this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
+  </div>
+  <p class="pin-error hidden" id="staff-delete-account-error"></p>
+  <div class="modal-actions">
+    <button class="danger" onclick="confirmDeleteStaffAccount()">Delete Permanently</button>
+    <button class="secondary" onclick="closeModal()">Cancel</button>
   </div>
 </div>
 
