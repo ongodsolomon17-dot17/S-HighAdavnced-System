@@ -37,7 +37,6 @@
 
 html {
   background: #070e22; /* covers the true edges during iOS's pinch/overscroll bounce, before body's gradient is even considered */
-  height: 100%;
 }
 html, body {
   margin: 0;
@@ -46,7 +45,7 @@ html, body {
   background: linear-gradient(160deg, #0b1733 0%, #070e22 60%, #0a1428 100%);
   color: var(--text);
   overflow-x: hidden;
-  overscroll-behavior: none; /* kills the iOS/Android rubber-band bounce that briefly reveals whatever's behind the page (white, by default) when you pinch or drag past an edge */
+  overscroll-behavior-y: contain; /* stop the bounce from chaining past the page edge without touching normal scroll — none broke scrolling entirely in Chromium (desktop Chrome + Samsung) */
 }
 
 /* ═══════════════════════════
@@ -413,12 +412,7 @@ select option { background: #0f1e45; color: var(--text); }
   max-width: 1280px;
   margin: 0 auto;
   padding: 20px 18px calc(100px + env(safe-area-inset-bottom, 0px)); /* bottom padding for bottom nav */
-  min-height: 100dvh;
-  min-height: 100vh; /* fallback for browsers without dvh support */
-  display: flex;
-  flex-direction: column;
 }
-.tab-panel { flex: 1; display: flex; flex-direction: column; }
 
 /* On taller phone screens (common on Android — e.g. Galaxy S20+), give
    content noticeably more breathing room instead of the same tight desktop
@@ -426,7 +420,7 @@ select option { background: #0f1e45; color: var(--text); }
    short screens (like the dashboard) actually feel like they belong to the
    screen instead of looking like a smaller app floating in a big canvas. */
 @media (max-width: 640px) and (min-height: 780px) {
-  .app-shell   { padding-top: 28px; gap: 6px; }
+  .app-shell   { padding-top: 28px; }
   .kpi-row     { gap: 18px; margin-bottom: 26px; }
   .kpi-card    { padding: 26px 24px; }
   .kpi-val     { font-size: 2.5rem; }
