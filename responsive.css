@@ -1,0 +1,89 @@
+/* ═══════════════════════════════════════════════════
+   RESPONSIVE.CSS — additive overrides only
+   Loaded AFTER style.css. Does not remove or rewrite
+   any existing rule — only fills gaps for extra
+   breakpoints (tablet / small phone / very small phone)
+   and fixes a few overflow edge-cases.
+   Target widths: 1920,1600,1440,1366,1280,1024,820,768,
+   540,430,414,390,375,360,320
+═══════════════════════════════════════════════════ */
+
+/* ── Global overflow safety net ──
+   Belt-and-braces on top of the existing body{overflow-x:hidden}
+   so nothing (long unbroken strings, etc.) can force a horizontal
+   scrollbar on any screen size. */
+html { overflow-x: hidden; width: 100%; }
+img, svg, canvas { max-width: 100%; height: auto; }
+
+/* ── Tablet range (iPad / Android tablets, 768–1023px) ──
+   .app-nav stays bottom-fixed here (style.css only swaps to the
+   top nav at 1024px+), so just tighten card/grid density a touch
+   so nothing feels cramped before the 980px grid-two collapse. */
+@media (max-width: 1023px) and (min-width: 641px) {
+  .app-shell { padding: 18px 16px 96px; }
+  .kpi-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+}
+
+/* ── Forms: stack label-above-input below 560px ──
+   .form-grid is a 2-col (label | input) grid; on narrow phones the
+   fixed minmax(120px,auto) label column leaves too little room for
+   the input, so let it collapse to a single column here. */
+@media (max-width: 560px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 6px 0;
+  }
+  .form-grid label {
+    margin-top: 10px;
+  }
+  .form-grid label:first-child {
+    margin-top: 0;
+  }
+}
+
+/* ── Small phones (≤430px: iPhone SE/12/13/14, small Android) ── */
+@media (max-width: 430px) {
+  .app-header { padding: 14px 16px; gap: 10px; }
+  .badge, .badge-lg { width: 46px; height: 46px; font-size: 1.1rem; border-radius: 14px; }
+  .header-left { gap: 12px; }
+  .kpi-row { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
+  .kpi-val { font-size: 1.6rem; }
+  .kpi-card { padding: 16px 16px; }
+  .summary-card-row { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); }
+  .auth-card { padding: 22px 16px 20px; }
+  .card { padding: 16px; }
+  .modal { padding: 20px 16px; }
+  th, td { padding: 9px 10px; font-size: 0.8rem; }
+}
+
+/* ── Very small phones (≤375px: iPhone SE 1st-gen width class, 360, 320) ── */
+@media (max-width: 375px) {
+  .splash-logo-wrap, .ao-wrap { width: 104px; height: 104px; }
+  .splash-s, .ao-avatar { width: 66px; height: 66px; font-size: 1.7rem; border-radius: 18px; }
+  .splash-title { font-size: 1.15rem; }
+  .pin-box { width: 44px !important; height: 52px !important; font-size: 1.25rem !important; }
+  .pin-inputs { gap: 8px; }
+  .modal-wide { padding-left: 14px !important; padding-right: 14px !important; }
+  .kpi-val { font-size: 1.4rem; }
+  .company-headline { max-width: 48vw; }
+}
+
+@media (max-width: 320px) {
+  .app-header { padding: 12px 12px; }
+  .badge, .badge-lg { width: 40px; height: 40px; font-size: 1rem; }
+  .auth-card { padding: 18px 12px 16px; }
+  .card { padding: 14px; }
+  th, td { padding: 8px; font-size: 0.76rem; }
+}
+
+/* ── Table horizontal-scroll niceties on touch devices ── */
+.table-wrap { -webkit-overflow-scrolling: touch; }
+
+/* ── Large / ultra-wide desktop screens (1600px+) ──
+   Layout is already centered via .app-shell / .auth-shell max-widths;
+   this just nudges the content ceiling up slightly so it doesn't look
+   too narrow on very large monitors, without changing the desktop
+   look at the more common 1280–1440px sizes. */
+@media (min-width: 1600px) {
+  .app-shell { max-width: 1400px; }
+}

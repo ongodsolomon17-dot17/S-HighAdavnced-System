@@ -92,11 +92,13 @@
       background: rgba(255,255,255,0.06);
       backdrop-filter: blur(16px);
       border-bottom: 1px solid rgba(255,255,255,0.1);
-      padding: 0 28px;
-      height: 62px;
+      padding: 12px 28px;
+      min-height: 62px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
       position: sticky;
       top: 0;
       z-index: 100;
@@ -220,7 +222,7 @@
     }
     .modal-card {
       background: #1a2a55; border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 18px; padding: 32px 28px; width: 360px;
+      border-radius: 18px; padding: 32px 28px; width: min(360px, 90vw);
       box-shadow: 0 32px 80px rgba(0,0,0,.4);
     }
     .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
@@ -244,10 +246,33 @@
     .btn-refresh:hover { background: rgba(63,193,201,0.2); }
     .empty-row { text-align: center; color: var(--text-muted); padding: 28px 0 !important; }
 
+    @media (max-width: 860px) {
+      .main { padding: 20px; }
+      .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    }
+
     @media (max-width: 600px) {
       .main { padding: 16px; }
-      .topbar { padding: 0 16px; }
+      .topbar { padding: 10px 16px; }
       .kpi-val { font-size: 26px; }
+      .login-card { padding: 32px 24px; }
+      .section { padding: 18px 16px; }
+      .modal-card { padding: 24px 20px; }
+    }
+
+    @media (max-width: 430px) {
+      .topbar-actions { gap: 8px; }
+      .server-time { display: none; } /* keeps Refresh/Sign Out reachable without wrapping past 2 lines */
+      .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+      .kpi-val { font-size: 22px; }
+      .badge-super, .topbar-badge { width: 40px; height: 40px; font-size: 18px; }
+      th, td { padding: 9px 10px; font-size: 12px; }
+    }
+
+    @media (max-width: 320px) {
+      .main { padding: 12px; }
+      .login-card { padding: 26px 18px; }
+      th, td { padding: 7px 8px; font-size: 11px; }
     }
   </style>
 </head>
@@ -375,6 +400,29 @@
 
 <script>
 "use strict";
+
+// ===== Global Double-Tap / Double-Click Guard ===============================
+// See app.js for full explanation — same pure event filter, installed here
+// too since this page has its own separate script and doesn't load app.js.
+(function () {
+  const COOLDOWN_MS = 700;
+  document.addEventListener("click", function (e) {
+    const el = e.target.closest(
+      'button, a.primary, a.accent, a.secondary, a[onclick], input[type="submit"], input[type="button"]'
+    );
+    if (!el) return;
+    if (el.disabled) return;
+    const now = Date.now();
+    const last = Number(el.dataset._lastTap || 0);
+    if (now - last < COOLDOWN_MS) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return;
+    }
+    el.dataset._lastTap = String(now);
+  }, true);
+})();
 
 const API_URL = "https://s-highadavnced-system.onrender.com";
 

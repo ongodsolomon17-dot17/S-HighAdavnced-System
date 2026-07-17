@@ -16,6 +16,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
 
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="responsive.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
@@ -1174,33 +1175,33 @@
     <button class="modal-close" onclick="closeModal()">×</button>
   </div>
   <div style="padding:8px 4px;font-size:13px;line-height:1.7;color:var(--text-muted)">
-    <p style="margin-bottom:16px">Last updated: <strong style="color:var(--text)">July 2026</strong> &nbsp;·&nbsp; S Advanced Attendance System</p>
+    <p style="margin-bottom:16px">Last updated: <strong style="color:var(--text)" id="privacy-modal-date">July 2026</strong> &nbsp;·&nbsp; S Advanced Attendance System</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">1. What We Collect</h4>
-    <p>Company name, email, phone, encrypted password and PIN, optional profile picture, attendance timestamps, GPS coordinates at check-in/out (only when location permission is granted), and device fingerprints for trusted-device verification.</p>
+    <p>Company name, email, phone, account password and PIN, optional company logo, attendance timestamps, location at the moment of check-in/out (only when permission is granted), and device recognition information used for trusted-device verification.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">2. How We Use It</h4>
-    <p>To manage accounts, record attendance, verify identity, send password reset codes (email/SMS/WhatsApp), prevent unauthorised access, and generate attendance reports for company admins.</p>
+    <p>To manage accounts, record attendance, verify identity, send account-related communications such as password reset codes, prevent unauthorised access, and generate attendance reports for company admins.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">3. Who Can See Your Data</h4>
-    <p><strong style="color:var(--text)">Admins</strong> see their own company's staff attendance and contact details only. <strong style="color:var(--text)">Staff</strong> see only their own records. We (the developers) access data only to maintain or secure the service.</p>
+    <p><strong style="color:var(--text)">Admins</strong> see their own company's staff attendance and contact details only. <strong style="color:var(--text)">Staff</strong> see only their own records. Authorized personnel access data only as necessary to maintain or secure the service.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">4. Third-Party Services</h4>
-    <p>Supabase (database), Render (backend hosting), Vercel (frontend hosting), Brevo (email), Vonage (SMS/WhatsApp). We do not sell or share data for advertising.</p>
+    <p>We use trusted third-party providers for cloud hosting, secure data storage, and email/messaging delivery. These providers process data only to deliver their services to us and do not use it for their own purposes. We do not sell or share data for advertising.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">5. Location Data</h4>
-    <p>GPS is only captured at the moment of a check-in or check-out — never tracked continuously. You can deny location permission, but geofencing-enabled check-ins may not work without it.</p>
+    <p>Location is only captured at the moment of a check-in or check-out — never tracked continuously. You can deny location permission, but geofencing-enabled check-ins may not work without it.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">6. Security</h4>
-    <p>Passwords and PINs are hashed before storage. All traffic uses HTTPS. Failed logins are rate-limited. New devices require admin approval before access is granted.</p>
+    <p>We use administrative, technical, and organizational safeguards designed to protect your information, including encrypted connections and additional verification for sign-ins from new or unrecognized devices. Passwords and PINs are never stored in plain text.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">7. Your Rights</h4>
     <p>You may request a copy, correction, or deletion of your data. Staff should contact their company admin. Admins may contact us at the email below.</p>
 
     <h4 style="color:var(--accent);margin:18px 0 6px">8. Contact</h4>
-    <p>Questions? Contact: <strong style="color:var(--text)">ongodsolomon17@gmail.com</strong></p>
+    <p>Questions? Contact: <strong style="color:var(--text)">stechtechnologies9@gmail.com</strong></p>
 
-    <p style="margin-top:20px;font-size:11px;color:var(--text-muted);opacity:0.7">This policy is a reasonable operational summary. For full GDPR/NDPR compliance, consult a legal professional.</p>
+    <p style="margin-top:20px;font-size:11px;color:var(--text-muted);opacity:0.7">See the full <a href="/privacy.html" target="_blank" style="color:var(--accent)">Privacy Policy</a> for complete details.</p>
   </div>
 </div>
 

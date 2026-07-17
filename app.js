@@ -2,6 +2,37 @@
 
 const API_URL = "https://s-highadavnced-system.onrender.com";
 
+// ===== Global Double-Tap / Double-Click Guard ===============================
+// Prevents any button (or button-like link) from firing its action twice in
+// quick succession — a fast double-tap on mobile, an accidental double-click,
+// or a repeated tap while a request is still in flight. This is a pure event
+// filter installed on the document in the CAPTURE phase, so it intercepts
+// the click before it reaches the element's own onclick/listener and simply
+// drops repeat clicks on the same control within a short cooldown window. It
+// does not call, wrap, or alter any existing handler function — every button
+// keeps its original onclick/behaviour exactly as-is on the first tap.
+(function () {
+  const COOLDOWN_MS = 700;
+
+  document.addEventListener("click", function (e) {
+    const el = e.target.closest(
+      'button, a.primary, a.accent, a.secondary, a.danger-btn, a.pill, a[onclick], input[type="submit"], input[type="button"]'
+    );
+    if (!el) return;
+    if (el.disabled) return; // already blocked natively; nothing more to do
+
+    const now = Date.now();
+    const last = Number(el.dataset._lastTap || 0);
+    if (now - last < COOLDOWN_MS) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return;
+    }
+    el.dataset._lastTap = String(now);
+  }, true);
+})();
+
 // ===== Auth Store ===========================================================
 // Identity fields live in localStorage (not sessionStorage) so that once
 // signed in, the session survives fully closing and reopening the installed
