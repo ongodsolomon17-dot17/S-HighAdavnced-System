@@ -924,7 +924,7 @@ input:checked + .toggle-slider:before { transform: translateX(22px); }
   button        { width: 100%; }
   .modal        { border-radius: 20px; width: 96vw; padding: 22px 18px; }
   .toast        { width: 90vw; text-align: center; white-space: normal; font-size: 0.85rem; }
-  .company-headline { font-size: clamp(1.2rem, 6vw, 1.8rem); max-width: 55vw; }
+  .company-headline { font-size: clamp(1.2rem, 6vw, 1.8rem); max-width: 80vw; max-height: 90vh; }
   .auth-card    { padding: 26px 18px 22px; }
   .pin-box      { width: 50px !important; height: 58px !important; font-size: 1.4rem !important; }
   .app-header   { padding: 16px 18px; }
