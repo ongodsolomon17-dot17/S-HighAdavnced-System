@@ -917,7 +917,7 @@ input:checked + .toggle-slider:before { transform: translateX(22px); }
 ═══════════════════════════ */
 @media (max-width: 980px) { .grid-two { grid-template-columns: 1fr; } }
 
-@media (max-width: 640px) {
+@media (max-width: 412px) {
   .app-shell    { padding: 14px 12px 90px; }
   .card         { padding: 16px; }
   .button-row   { flex-direction: column; }
