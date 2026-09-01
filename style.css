@@ -494,8 +494,8 @@ select option { background: #0f1e45; color: var(--text); }
 #Attendance-nav-btns-icons{
   
   display: flex; align-items: center; justify-content: center;
-  border-radius: 40px; padding: 6px;
-  object-fit:contain; width: 36px; height: 36px;
+  border-radius: 10px; padding: 6px;
+  width: 36px; height: 36px;
 }
 .nav-tab.active {
   color: var(--accent);
